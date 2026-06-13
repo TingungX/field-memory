@@ -3,20 +3,89 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>field-memory chat</title>
+<title>field-memory 控制台</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 :root {
   --bg: #f5f4f0; --surface: #fff; --text: #1a1a1a; --text-muted: #6b6b6b;
   --user-bubble: #e8edf4; --border: #e0ddd8; --font: -apple-system, system-ui, sans-serif;
+  --accent: #4a6fa5; --tag-bg: #eef2f7; --panel-bg: #fafaf8;
+  --col-left: 260px; --col-right: 320px;
 }
-body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-header { flex-shrink:0; padding:10px 20px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; overflow:hidden; display:flex; flex-direction:column; }
+header { flex-shrink:0; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:8px; flex-wrap:wrap; z-index:10; }
 header h1 { font-size:14px; font-weight:600; margin-right:auto; }
-header select, header input { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font-family:var(--font); }
-header input { width:200px; }
-#messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:16px; }
-.message { display:flex; flex-direction:column; max-width:72%; animation:fadeIn .2s ease; }
+header input, header select { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font-family:var(--font); }
+header input[type="text"], header input[type="password"] { width:100px; }
+header .hdr-btn { font-size:11px; padding:4px 10px; border:1px solid var(--border); border-radius:5px; background:var(--surface); color:var(--text); cursor:pointer; font-family:var(--font); }
+header .hdr-btn:hover { background:var(--bg); }
+header .hdr-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* ── three-column layout ── */
+#columns { flex:1; display:flex; overflow:hidden; min-height:0; }
+
+/* left panel */
+#panel-core { width:var(--col-left); flex-shrink:0; overflow-y:auto; background:var(--panel-bg); border-right:1px solid var(--border); padding:12px; font-size:11px; }
+#panel-core h3 { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin:12px 0 6px; }
+#panel-core h3:first-child { margin-top:0; }
+.pc-row { display:flex; justify-content:space-between; padding:2px 0; }
+.pc-row .l { color:var(--text-muted); }
+.pc-row .v { font-weight:500; font-variant-numeric:tabular-nums; }
+.pc-seed { padding:3px 0; border-top:1px solid var(--border); font-size:10px; color:var(--text-muted); }
+.pc-activity { padding:3px 0; border-top:1px solid var(--border); font-size:10px; line-height:1.4; }
+
+/* right panel */
+#panel-mem { width:var(--col-right); flex-shrink:0; overflow-y:auto; background:var(--panel-bg); border-left:1px solid var(--border); padding:12px; font-size:11px; }
+#panel-mem h3 { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin:12px 0 6px; }
+#panel-mem h3:first-child { margin-top:0; }
+.pm-row { display:flex; justify-content:space-between; padding:2px 0; }
+.pm-row .l { color:var(--text-muted); }
+.pm-row .v { font-weight:500; font-variant-numeric:tabular-nums; }
+
+/* library selector */
+.lib-row { display:flex; gap:4px; align-items:center; margin:4px 0 8px; }
+.lib-row select { flex:1; font-size:11px; padding:3px 6px; border:1px solid var(--border); border-radius:4px; background:var(--surface); font-family:var(--font); }
+.lib-row button { font-size:10px; padding:3px 6px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); cursor:pointer; }
+.lib-row button:hover { background:var(--bg); }
+
+/* ── Field visualization canvas ── */
+.field-viz-wrap {
+  position: relative; width:100%; aspect-ratio:1; background:#0e1116;
+  border-radius:8px; overflow:hidden; margin:6px 0;
+  box-shadow: inset 0 0 24px rgba(74, 111, 165, 0.2);
+}
+.field-viz-canvas { display:block; width:100%; height:100%; }
+.field-viz-overlay {
+  position:absolute; top:6px; right:8px; font-size:9px; color:rgba(255,255,255,0.5);
+  text-align:right; line-height:1.3; pointer-events:none;
+}
+
+/* anchor density bars */
+.pm-anchor { display:flex; align-items:center; gap:4px; padding:2px 0; }
+.pm-anchor .lbl { flex-shrink:0; min-width:50px; max-width:70px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pm-anchor .bar { flex:1; height:5px; background:var(--bg); border-radius:3px; overflow:hidden; }
+.pm-anchor .bar .fill { height:100%; background:#6b6b6b; border-radius:3px; }
+.pm-anchor .val { width:30px; text-align:right; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+.pm-event { padding:3px 0; border-top:1px solid var(--border); font-size:10px; color:var(--text-muted); line-height:1.4; }
+.pm-event .e-txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pm-event .e-ts { font-size:9px; color:#999; }
+.ecg-bar { display:flex; align-items:flex-end; gap:2px; height:28px; margin:4px 0; }
+.ecg-bar .col { width:6px; background:var(--accent); border-radius:2px 2px 0 0; min-height:1px; opacity:.6; }
+.pm-actions { display:flex; gap:4px; flex-wrap:wrap; margin:6px 0; }
+.pm-actions button { font-size:10px; padding:3px 8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--text); cursor:pointer; }
+.pm-actions button:hover { background:var(--bg); }
+
+/* chat */
+#panel-chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+#messages { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px; }
+#input-area { flex-shrink:0; padding:12px 20px 16px; background:var(--surface); border-top:1px solid var(--border); display:flex; gap:8px; align-items:flex-end; }
+#input-area textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:14px; font-family:var(--font); line-height:1.5; background:var(--surface); color:var(--text); outline:none; }
+#input-area textarea:focus { border-color:#888; }
+#input-area textarea::placeholder { color:#aaa; }
+#input-area button { width:36px; height:36px; border-radius:8px; border:none; background:#1a1a1a; color:#fff; cursor:pointer; font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+#input-area button:hover { opacity:.85; }
+#input-area button:disabled { opacity:.4; cursor:default; }
+.message { display:flex; flex-direction:column; max-width:80%; animation:fadeIn .2s ease; }
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 .message.user { align-self:flex-end; }
 .message.assistant { align-self:flex-start; }
@@ -26,158 +95,66 @@ header input { width:200px; }
 .message .meta { font-size:10px; color:var(--text-muted); margin-top:3px; padding:0 3px; }
 .message.user .meta { text-align:right; }
 .typing .content { color:var(--text-muted) !important; }
-#input-area { flex-shrink:0; padding:14px 20px 20px; background:var(--surface); border-top:1px solid var(--border); display:flex; gap:8px; align-items:flex-end; }
-#input-area textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:14px; font-family:var(--font); line-height:1.5; background:var(--surface); color:var(--text); outline:none; transition:border-color .15s; }
-#input-area textarea:focus { border-color:#888; }
-#input-area button { width:36px; height:36px; border-radius:8px; border:none; background:#1a1a1a; color:#fff; cursor:pointer; font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s; }
-#input-area button:hover { opacity:.85; }
-#input-area button:disabled { opacity:.4; cursor:default; }
-.welcome { align-self:center; text-align:center; color:var(--text-muted); margin-top:10vh; font-size:13px; line-height:1.8; }
+.welcome { align-self:center; text-align:center; color:var(--text-muted); margin-top:8vh; font-size:13px; line-height:1.8; }
 .welcome strong { color:var(--text); font-weight:500; }
 
-/* === memory panel === */
-#memory-panel {
-  position: fixed;
-  right: 0;
-  top: 53px;
-  bottom: 0;
-  width: 280px;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  padding: 14px;
-  overflow-y: auto;
-  font-size: 12px;
-  z-index: 100;
-  display: none;
-}
-#memory-panel h3 {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-.mem-section { margin-bottom: 16px; }
-.mem-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 3px 0;
-}
-.mem-row .label { color: var(--text-muted); }
-.mem-row .value { font-weight: 500; }
-.mem-anchor-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-}
-.mem-anchor-label {
-  flex-shrink: 0;
-  min-width: 60px;
-  max-width: 80px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mem-density-bar {
-  flex: 1;
-  height: 6px;
-  background: var(--bg);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.mem-density-fill {
-  height: 100%;
-  background: #6b6b6b;
-  border-radius: 3px;
-  transition: width .3s ease;
-}
-.mem-density-value {
-  flex-shrink: 0;
-  width: 40px;
-  text-align: right;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.mem-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.mem-actions button {
-  font-size: 11px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-.mem-actions button:hover { background: var(--bg); }
-.mem-not-available {
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
-  padding: 40px 0;
-  line-height: 1.6;
-}
+.mem-ctx-toggle { font-size:10px; color:var(--text-muted); cursor:pointer; padding:2px 3px; margin-top:2px; display:inline-flex; align-items:center; gap:4px; user-select:none; }
+.mem-ctx-toggle::before { content:"\25B6"; font-size:8px; transition:transform .15s; display:inline-block; }
+.mem-ctx-toggle.open::before { transform:rotate(90deg); }
+.mem-ctx-detail { font-size:11px; color:var(--text-muted); background:var(--tag-bg); border-radius:6px; padding:8px 10px; margin-top:4px; line-height:1.6; display:none; border:1px solid var(--border); }
+.mem-ctx-detail.open { display:block; }
+.mem-ctx-detail .label { color:var(--accent); font-weight:500; }
+.mem-ctx-detail .item { padding:1px 0; }
 
-body.mem-active #messages,
-body.mem-active #input-area {
-  margin-right: 280px;
-}
-
-@media (max-width: 800px) {
-  body.mem-active #messages,
-  body.mem-active #input-area { margin-right: 0; }
-  #memory-panel { display: none !important; }
-}
+@media (max-width: 1000px) { #panel-core { display:none; } #panel-mem { width:260px; } }
+@media (max-width: 700px) { #panel-mem { display:none; } }
 </style>
 </head>
 <body>
-
 <header>
   <h1>field-memory</h1>
-  <select id="model-select">
-    <option value="test-model-1">test-model-1</option>
-    <option value="test-model-2">test-model-2</option>
-  </select>
-  <input id="api-key" type="password" placeholder="api key (sk-fm)" value="sk-fm">
-  <input id="backend-url" type="text" placeholder="base url" value="http://127.0.0.1:4000">
+  <select id="lib-select" onchange="onLibraryChange(this.value)"></select>
+  <button class="hdr-btn" onclick="showLibraryDialog()">管理</button>
+  <select id="model-select"><option>test-model-1</option><option>test-model-2</option></select>
+  <input id="api-key" type="password" placeholder="API Key" value="sk-fm">
+  <input id="backend-url" type="text" placeholder="代理地址" value="http://127.0.0.1:5100">
 </header>
 
-<div id="memory-panel">
-  <div id="mem-content"><div class="mem-not-available">loading&hellip;</div></div>
-</div>
-
-<div id="messages">
-  <div class="welcome">
-    <strong>field-memory chat</strong><br>
-    testing field-memory on your own LLM backend
+<div id="columns">
+  <div id="panel-core"></div>
+  <div id="panel-chat">
+    <div id="messages">
+      <div class="welcome">
+        <strong>field-memory</strong><br>
+        库选择器在 header &middot; 记忆场可视化在右栏 &middot; 聊天在中栏
+      </div>
+    </div>
+    <div id="input-area">
+      <textarea id="user-input" rows="1" placeholder="/help 查看命令  或直接聊天..." onkeydown="handleKey(event)"></textarea>
+      <button id="send-btn" onclick="send()">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="2" y1="8" x2="14" y2="8"/><polyline points="10,4 14,8 10,12"/>
+        </svg>
+      </button>
+    </div>
   </div>
-</div>
-
-<div id="input-area">
-  <textarea id="user-input" rows="1" placeholder="type a message..." onkeydown="handleKey(event)"></textarea>
-  <button id="send-btn" onclick="send()">
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <line x1="2" y1="8" x2="14" y2="8"/>
-      <polyline points="10,4 14,8 10,12"/>
-    </svg>
-  </button>
+  <div id="panel-mem"></div>
 </div>
 
 <script>
-let messages = [];
-let isStreaming = false;
-const msgEl = document.getElementById('messages');
-const input = document.getElementById('user-input');
-const sendBtn = document.getElementById('send-btn');
-const modelSelect = document.getElementById('model-select');
-const apiKeyInput = document.getElementById('api-key');
-const urlInput = document.getElementById('backend-url');
+var messages = [], isStreaming = false, pollTimer = null;
+var currentLibrary = 'default';
+var lastAnchors = [];
+var fieldParticles = [];
+var fieldTension = 0;
+var lastAnchorCount = 0;
+
+var msgEl = document.getElementById('messages');
+var input = document.getElementById('user-input');
+var sendBtn = document.getElementById('send-btn');
+var modelSelect = document.getElementById('model-select');
+var apiKeyInput = document.getElementById('api-key');
+var urlInput = document.getElementById('backend-url');
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -185,171 +162,652 @@ function handleKey(e) {
   input.style.height = Math.min(input.scrollHeight, 120) + 'px';
 }
 
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(fetchStatus, 1500);
+  fetchStatus();
+}
+
+// ── Library management ──
+async function loadLibraryList() {
+  try {
+    var resp = await fetch('/api/memory/libraries');
+    var data = await resp.json();
+    currentLibrary = data.active || 'default';
+    var sel = document.getElementById('lib-select');
+    sel.innerHTML = '';
+    var opt = document.createElement('option');
+    opt.value = currentLibrary;
+    opt.textContent = currentLibrary + ' (active)';
+    sel.appendChild(opt);
+    for (var i = 0; i < data.libraries.length; i++) {
+      var l = data.libraries[i];
+      if (l.name === currentLibrary) continue;
+      var o2 = document.createElement('option');
+      o2.value = l.name;
+      o2.textContent = l.name + ' (' + l.anchors_count + '锚点)';
+      sel.appendChild(o2);
+    }
+  } catch(e) {}
+}
+
+async function onLibraryChange(name) {
+  if (!name || name === currentLibrary) return;
+  // "currentLibrary (active)" is not a real name
+  if (name.indexOf(' (active)') > 0) name = name.split(' (')[0];
+  try {
+    var resp = await fetch('/api/memory/library/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name }),
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      addMessage('assistant', '已切换到记忆库: ' + data.name + ' (' + data.anchors_count + ' 锚点, ' + data.events_count + ' 事件)');
+      currentLibrary = data.name;
+      await loadLibraryList();
+      fetchStatus();
+    } else {
+      addMessage('assistant', '切换失败: ' + (data.error || '未知错误'));
+      loadLibraryList();
+    }
+  } catch(e) {
+    addMessage('assistant', '切换请求失败: ' + e.message);
+  }
+}
+
+function showLibraryDialog() {
+  var existing = document.querySelector('.lib-dialog');
+  if (existing) existing.remove();
+  var d = document.createElement('div');
+  d.className = 'lib-dialog';
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.2);z-index:500;display:flex;align-items:center;justify-content:center';
+  d.innerHTML =
+    '<div style="background:#fff;border-radius:10px;padding:20px 24px;min-width:320px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.12)">' +
+    '<h3 style="font-size:14px;font-weight:600;margin-bottom:12px">记忆库管理</h3>' +
+    '<div style="font-size:11px;color:#666;margin-bottom:8px">当前库: <strong>' + currentLibrary + '</strong></div>' +
+    '<div style="font-size:11px;margin-bottom:4px">保存当前库为新名称:</div>' +
+    '<div style="display:flex;gap:4px;margin-bottom:12px">' +
+    '<input id="lib-save-name" placeholder="my-library" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px">' +
+    '<button id="lib-save-btn" style="padding:6px 12px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:11px;cursor:pointer">保存</button>' +
+    '</div>' +
+    '<div style="font-size:11px;margin-bottom:4px">已保存的库（点击删除）:</div>' +
+    '<div id="lib-list" style="max-height:200px;overflow-y:auto;font-size:11px"></div>' +
+    '<div style="margin-top:12px;text-align:right">' +
+    '<button id="lib-close-btn" style="padding:6px 12px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:11px">关闭</button>' +
+    '</div></div>';
+  document.body.appendChild(d);
+  document.getElementById('lib-close-btn').onclick = function() { d.remove(); };
+  document.getElementById('lib-save-btn').onclick = function() {
+    var n = document.getElementById('lib-save-name').value.trim();
+    if (n) saveAsLibrary(n);
+  };
+  renderLibListInDialog();
+}
+
+async function saveAsLibrary(name) {
+  try {
+    var resp = await fetch('/api/memory/library/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name }),
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      addMessage('assistant', '已保存为记忆库: ' + data.name);
+      await loadLibraryList();
+      var d = document.querySelector('.lib-dialog');
+      if (d) d.remove();
+      showLibraryDialog();
+    } else {
+      addMessage('assistant', '保存失败: ' + (data.error || '未知错误'));
+    }
+  } catch(e) { addMessage('assistant', '保存失败: ' + e.message); }
+}
+
+async function renderLibListInDialog() {
+  try {
+    var resp = await fetch('/api/memory/libraries');
+    var data = await resp.json();
+    var html = '';
+    for (var i = 0; i < data.libraries.length; i++) {
+      var l = data.libraries[i];
+      var isActive = l.name === currentLibrary;
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-bottom:1px solid #eee">' +
+        '<span style="flex:1">' + (isActive ? '<strong>' : '') + l.name + ' (' + l.anchors_count + ' 锚点)' + (isActive ? ' ⭐</strong>' : '') + '</span>' +
+        '<button data-name="' + l.name + '" class="lib-load-btn" style="padding:2px 8px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:10px;margin-right:4px">切换</button>' +
+        (!isActive ? '<button data-name="' + l.name + '" class="lib-del-btn" style="padding:2px 8px;border:1px solid #fcc;border-radius:3px;background:#fff;color:#c33;cursor:pointer;font-size:10px">删除</button>' : '') +
+        '</div>';
+    }
+    if (!data.libraries.length) html = '<div style="color:#999;padding:8px">（暂无已保存的库）</div>';
+    var list = document.getElementById('lib-list');
+    if (list) {
+      list.innerHTML = html;
+      var loadBtns = list.querySelectorAll('.lib-load-btn');
+      for (var j = 0; j < loadBtns.length; j++) {
+        loadBtns[j].onclick = function() { onLibraryChange(this.getAttribute('data-name')); var d = document.querySelector('.lib-dialog'); if (d) d.remove(); };
+      }
+      var delBtns = list.querySelectorAll('.lib-del-btn');
+      for (var k = 0; k < delBtns.length; k++) {
+        delBtns[k].onclick = function() { deleteLibrary(this.getAttribute('data-name')); };
+      }
+    }
+  } catch(e) {}
+}
+
+async function deleteLibrary(name) {
+  if (!confirm('删除记忆库 "' + name + '" ?')) return;
+  try {
+    var resp = await fetch('/api/memory/library/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name }),
+    });
+    var data = await resp.json();
+    if (data.ok) {
+      addMessage('assistant', '已删除记忆库: ' + name);
+      await loadLibraryList();
+      showLibraryDialog();
+    } else {
+      addMessage('assistant', '删除失败: ' + (data.error || ''));
+    }
+  } catch(e) {}
+}
+
+// ── Field visualization ──
+function renderFieldViz(anchors, tension) {
+  var canvas = document.getElementById('field-canvas');
+  if (!canvas) return;
+  var w = canvas.width = canvas.clientWidth;
+  var h = canvas.height = canvas.clientHeight;
+  var ctx = canvas.getContext('2d');
+
+  // Trigger particles when new events appear (we'll just animate by recent count change)
+  if (anchors.length > lastAnchorCount) {
+    for (var i = 0; i < Math.min(8, anchors.length - lastAnchorCount); i++) {
+      fieldParticles.push({
+        x: w / 2 + (Math.random() - 0.5) * 20,
+        y: h / 2 + (Math.random() - 0.5) * 20,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        life: 1.0,
+      });
+    }
+  }
+  lastAnchorCount = anchors.length;
+
+  // Background: field tension as radial gradient
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, w, h);
+  var tnorm = Math.min(tension / 30, 1);
+  var grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.min(w, h) * 0.55);
+  grad.addColorStop(0, 'rgba(74, 111, 165, ' + (0.1 + tnorm * 0.4) + ')');
+  grad.addColorStop(1, 'rgba(14, 17, 22, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid (subtle)
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (var i = 0; i < w; i += 30) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke();
+  }
+  for (var j = 0; j < h; j += 30) {
+    ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(w, j); ctx.stroke();
+  }
+
+  // Compute positions
+  var cx = w / 2, cy = h / 2, scale = Math.min(w, h) * 0.36;
+  var positions = anchors.map(function(a) {
+    return {
+      x: cx + a.direction_xy[0] * scale,
+      y: cy - a.direction_xy[1] * scale,
+      a: a,
+    };
+  });
+
+  // Draw connections (cosine > 0.5)
+  for (var i = 0; i < positions.length; i++) {
+    for (var k = i + 1; k < positions.length; k++) {
+      var a = positions[i].a, b = positions[k].a;
+      var dot = a.direction_xy[0] * b.direction_xy[0] + a.direction_xy[1] * b.direction_xy[1];
+      if (dot > 0.5) {
+        var alpha = (dot - 0.5) * 0.5;
+        ctx.strokeStyle = 'rgba(74, 111, 165, ' + alpha + ')';
+        ctx.lineWidth = dot * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(positions[i].x, positions[i].y);
+        ctx.lineTo(positions[k].x, positions[k].y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw anchors
+  for (var p of positions) {
+    var d = p.a.density;
+    var layer = d > 15 ? 'L1' : d > 8 ? 'L2' : d > 3 ? 'L3' : 'L4';
+    var colors = { L1: '#ff6b6b', L2: '#ffa94d', L3: '#ffd43b', L4: '#74c0fc' };
+    var color = colors[layer];
+    var size = Math.sqrt(d) * 3 + 5;
+
+    // Outer glow
+    var g2 = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 3);
+    g2.addColorStop(0, color);
+    g2.addColorStop(0.3, color.replace(')', ', 0.3)').replace('rgb', 'rgba'));
+    g2.addColorStop(1, 'transparent');
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Solid core
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // White core
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Label
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(p.a.label, p.x, p.y + size + 12);
+  }
+
+  // Animate & draw particles
+  fieldParticles = fieldParticles.filter(function(p) { return p.life > 0; });
+  for (var particle of fieldParticles) {
+    particle.x += particle.vx;
+    particle.y += particle.vy;
+    particle.life -= 0.02;
+    ctx.fillStyle = 'rgba(255, 200, 100, ' + particle.life + ')';
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ── Status / panels ──
+async function fetchStatus() {
+  try {
+    var resp = await fetch('/api/memory/status');
+    if (!resp.ok) throw Error();
+    var data = await resp.json();
+    renderCorePanel(data);
+    renderMemPanel(data);
+    fieldTension = data.ecg ? data.ecg.field_tension : 0;
+    renderFieldViz(data.anchors || [], fieldTension);
+  } catch(e) {}
+}
+
+function renderCorePanel(d) {
+  var el = document.getElementById('panel-core'), html = '';
+  html += '<h3>引擎参数</h3>';
+  html += '<div class="pc-row"><span class="l">向量维度</span><span class="v">'+d.vector_dim+'</span></div>';
+  html += '<div class="pc-row"><span class="l">事件窗口（秒）</span><span class="v">'+d.event_window_secs+'</span></div>';
+  html += '<div class="pc-row"><span class="l">阻尼基数</span><span class="v">'+d.damping_base.toFixed(2)+'</span></div>';
+  html += '<div class="pc-row"><span class="l">刚度基数</span><span class="v">'+d.stiffness_base.toFixed(2)+'</span></div>';
+  html += '<div class="pc-row"><span class="l">收敛阈值</span><span class="v">'+d.convergence_threshold.toFixed(4)+'</span></div>';
+  html += '<h3>松弛周期</h3>';
+  html += '<div class="pc-row"><span class="l">时间窗口（秒）</span><span class="v">'+d.cycle_window_secs+'</span></div>';
+  html += '<div class="pc-row"><span class="l">impact 阈值</span><span class="v">'+d.impact_trace_threshold.toFixed(3)+'</span></div>';
+  html += '<h3>计数</h3>';
+  html += '<div class="pc-row"><span class="l">锚点</span><span class="v">'+d.anchors_count+'</span></div>';
+  html += '<div class="pc-row"><span class="l">事件</span><span class="v">'+d.events_count+'</span></div>';
+  html += '<div class="pc-row"><span class="l">痕迹</span><span class="v">'+d.traces_count+'</span></div>';
+  html += '<div class="pc-row"><span class="l">种子</span><span class="v">'+d.seeds_count+'</span></div>';
+  html += '<div class="pc-row"><span class="l">ECG 快照</span><span class="v">'+d.ecg_snapshots+'</span></div>';
+  if (d.seeds && d.seeds.length > 0) {
+    html += '<h3>范式转移</h3>';
+    for (var si = 0; si < d.seeds.length; si++) {
+      var s = d.seeds[si];
+      html += '<div class="pc-seed">被击败者='+s.defeated_by+' 压力='+s.pressure_accumulated.toFixed(2)+'</div>';
+    }
+  }
+  if (d.ecg_history && d.ecg_history.length > 0) {
+    html += '<h3>ECG 张力历史</h3>';
+    var snapshots = d.ecg_history, maxT = 1;
+    for (var i = 0; i < snapshots.length; i++) { if (snapshots[i].tension > maxT) maxT = snapshots[i].tension; }
+    html += '<div class="ecg-bar">';
+    for (var i = snapshots.length - 1; i >= 0; i--) {
+      var h = Math.max(2, (snapshots[i].tension / maxT) * 26);
+      html += '<div class="col" style="height:'+h.toFixed(0)+'px" title="'+snapshots[i].tension.toFixed(3)+'"></div>';
+    }
+    html += '</div>';
+    var last = snapshots[snapshots.length - 1];
+    html += '<div class="pc-row"><span class="l">张力</span><span class="v">'+last.tension.toFixed(3)+'</span></div>';
+    html += '<div class="pc-row"><span class="l">收敛率</span><span class="v">'+last.convergence_rate.toFixed(4)+'</span></div>';
+  }
+  if (d.recent_activity && d.recent_activity.length > 0) {
+    html += '<h3>最近活动</h3>';
+    for (var i = 0; i < Math.min(d.recent_activity.length, 8); i++) {
+      var a = d.recent_activity[i], ts = a.timestamp ? a.timestamp.slice(11, 19) : '';
+      var icon = '';
+      switch (a.kind) {
+        case 'EventInput': icon = '\uD83D\uDCDD'; break;
+        case 'Relax':      icon = '\uD83D\uDD04'; break;
+        case 'Init':       icon = '\uD83C\uDF31'; break;
+        case 'ParadigmShift': icon = '\u26A1'; break;
+        case 'Save':       icon = '\uD83D\uDCBE'; break;
+        case 'Load':       icon = '\uD83D\uDCC2'; break;
+        case 'Consolidate':icon = '\uD83D\uDD17'; break;
+        default:           icon = '\u00B7'; break;
+      }
+      var detailHtml = esc(a.detail).replace(/\n/g, '<br>');
+      html += '<div class="pc-activity"><span style="color:var(--text-muted)">'+icon+' '+detailHtml+'</span><span style="float:right;font-size:9px;color:#999">'+ts+'</span></div>';
+    }
+  }
+  el.innerHTML = html;
+}
+
+function renderMemPanel(d) {
+  var el = document.getElementById('panel-mem'), html = '';
+
+  // Library selector
+  html += '<h3>记忆库</h3>';
+  html += '<div class="lib-row" style="display:none"></div>';
+
+  // Field visualization
+  html += '<h3>场可视化</h3>';
+  html += '<div class="field-viz-wrap">';
+  html += '<canvas id="field-canvas" class="field-viz-canvas"></canvas>';
+  html += '<div class="field-viz-overlay">';
+  if (d.ecg) html += 'tension: ' + d.ecg.field_tension.toFixed(2) + '<br>';
+  html += (d.anchors_count || 0) + ' 锚点';
+  html += '</div></div>';
+
+  html += '<h3>ECG</h3>';
+  if (d.ecg) {
+    html += '<div class="pm-row"><span class="l">张力</span><span class="v">'+d.ecg.field_tension.toFixed(4)+'</span></div>';
+    html += '<div class="pm-row"><span class="l">收敛</span><span class="v">'+d.ecg.convergence_rate.toFixed(4)+'</span></div>';
+    html += '<div class="pm-row"><span class="l">各向异性</span><span class="v">'+d.ecg.anisotropy_magnitude.toFixed(4)+'</span></div>';
+  }
+  html += '<h3>锚点 ('+d.anchors_count+')</h3>';
+  var anchors = d.anchors || [], maxD = 1;
+  for (var i = 0; i < anchors.length; i++) { if (anchors[i].density > maxD) maxD = anchors[i].density; }
+  for (var i = 0; i < anchors.length; i++) {
+    var a = anchors[i], pct = (a.density / maxD * 100).toFixed(0);
+    html += '<div class="pm-anchor"><span class="lbl" title="'+esc(a.label)+'">'+esc(a.label)+'</span><div class="bar"><div class="fill" style="width:'+pct+'%"></div></div><span class="val">'+a.density+'</span></div>';
+  }
+  html += '<h3>统计</h3>';
+  html += '<div class="pm-row"><span class="l">事件</span><span class="v">'+d.events_count+'</span></div>';
+  html += '<div class="pm-row"><span class="l">痕迹</span><span class="v">'+d.traces_count+'</span></div>';
+  html += '<div class="pm-row"><span class="l">种子</span><span class="v">'+d.seeds_count+'</span></div>';
+  if (d.recent_events && d.recent_events.length > 0) {
+    html += '<h3>最近事件</h3>';
+    var limit = Math.min(d.recent_events.length, 5);
+    for (var i = 0; i < limit; i++) {
+      var ev = d.recent_events[i], ts = ev.timestamp ? ev.timestamp.slice(11, 19) : '';
+      html += '<div class="pm-event"><div class="e-txt" title="'+esc(ev.text)+'">'+esc(ev.text)+'</div><div class="e-ts">'+ts+'</div></div>';
+    }
+  }
+  el.innerHTML = html;
+  // Trigger field viz render
+  renderFieldViz(anchors, d.ecg ? d.ecg.field_tension : 0);
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Chat ──
 async function send() {
-  const text = input.value.trim();
+  var text = input.value.trim();
   if (!text || isStreaming) return;
   input.value = ''; input.style.height = 'auto';
   isStreaming = true; sendBtn.disabled = true;
 
-  const welcome = msgEl.querySelector('.welcome');
+  var welcome = msgEl.querySelector('.welcome');
   if (welcome) welcome.remove();
+
+  // Slash commands
+  if (text.indexOf('/') === 0) {
+    var parts = text.split(/\s+/);
+    var cmdName = parts[0].slice(1).toLowerCase();
+    if (cmdName === 'seed' || cmdName === 's') await handleSeedCommand(parts.slice(1));
+    else if (cmdName === 'recall' || cmdName === 'r') await handleQueryCommand(parts.slice(1).join(' '), 'recall');
+    else if (cmdName === 'associate' || cmdName === 'a') await handleQueryCommand(parts.slice(1).join(' '), 'associate');
+    else if (cmdName === 'save') await saveMem();
+    else if (cmdName === 'load') await loadMem();
+    else if (cmdName === 'status' || cmdName === 'st') await showStatusInline();
+    else if (cmdName === 'help' || cmdName === 'h' || cmdName === '?') showHelp();
+    else addMessage('assistant', '未知命令: ' + parts[0] + '。输入 /help 查看命令。');
+    isStreaming = false; sendBtn.disabled = false; input.focus();
+    return;
+  }
 
   addMessage('user', text);
   messages.push({ role: 'user', content: text });
-
-  const assistantDiv = addMessage('assistant', '');
+  var assistantDiv = addMessage('assistant', '');
   assistantDiv.classList.add('typing');
-  const contentEl = assistantDiv.querySelector('.content');
+  var contentEl = assistantDiv.querySelector('.content');
   contentEl.textContent = '...';
 
-  const baseUrl = urlInput.value.replace(/\/$/, '');
+  var baseUrl = urlInput.value.replace(/\/$/, '');
   try {
-    const resp = await fetch(baseUrl + '/v1/chat/completions', {
+    var resp = await fetch(baseUrl + '/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKeyInput.value,
-      },
-      body: JSON.stringify({ messages, model: modelSelect.value, stream: true }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyInput.value },
+      body: JSON.stringify({ messages: messages, model: modelSelect.value, stream: true }),
     });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
-
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     assistantDiv.classList.remove('typing');
-    let fullText = '';
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
+    var fullText = '', memoryCtx = null, reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '';
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split('\n');
       buffer = lines.pop() || '';
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t.startsWith('data: ')) continue;
-        const data = t.slice(6);
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (line.indexOf('data: ') !== 0) continue;
+        var data = line.slice(6);
         if (data === '[DONE]') break;
+        if (data.indexOf('__MEMORY__') === 0) {
+          try { memoryCtx = JSON.parse(data.slice(10)); } catch(e) {}
+          continue;
+        }
         fullText += data;
         contentEl.textContent = fullText;
         msgEl.scrollTop = msgEl.scrollHeight;
       }
     }
+    if (memoryCtx) renderMemoryCtx(assistantDiv, memoryCtx);
     messages.push({ role: 'assistant', content: fullText });
+    if (memoryCtx && memoryCtx.tool_invoked) fetchStatus();
   } catch (e) {
     assistantDiv.classList.remove('typing');
-    contentEl.textContent = 'Error: ' + e.message;
+    contentEl.textContent = '错误: ' + e.message;
   }
   isStreaming = false; sendBtn.disabled = false; input.focus();
-  updateMemoryPanel();
+}
+
+async function handleSeedCommand(args) {
+  var userDesc = args.length > 0 ? args.join(' ') : '';
+  var seedPrompt = '【记忆构建模式】你现在是记忆构建助手。请通过对话了解我的知识结构、经验偏好和核心原则，然后逐步调用 seed_memory tool 来构建记忆库。\n' +
+    '建议流程：\n' +
+    '1. 先通过提问了解我的背景\n' +
+    '2. 每次了解一批概念后调用一次 seed_memory\n' +
+    '3. 继续提问、继续注入，直到记忆库完整\n';
+  if (userDesc) seedPrompt += '\n初始信息：' + userDesc + '\n请在此基础上开始提问。';
+
+  addMessage('user', '/' + (args.length > 0 ? 'seed ' + userDesc : 'seed'));
+  messages.push({ role: 'user', content: seedPrompt });
+
+  var assistantDiv = addMessage('assistant', '');
+  assistantDiv.classList.add('typing');
+  var contentEl = assistantDiv.querySelector('.content');
+  contentEl.textContent = '...';
+
+  var baseUrl = urlInput.value.replace(/\/$/, '');
+  try {
+    var resp = await fetch(baseUrl + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyInput.value },
+      body: JSON.stringify({ messages: messages, model: modelSelect.value, stream: true }),
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    assistantDiv.classList.remove('typing');
+    var fullText = '', memoryCtx = null, reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '';
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (line.indexOf('data: ') !== 0) continue;
+        var data = line.slice(6);
+        if (data === '[DONE]') break;
+        if (data.indexOf('__MEMORY__') === 0) {
+          try { memoryCtx = JSON.parse(data.slice(10)); } catch(e) {}
+          continue;
+        }
+        fullText += data;
+        contentEl.textContent = fullText;
+        msgEl.scrollTop = msgEl.scrollHeight;
+      }
+    }
+    if (memoryCtx) renderMemoryCtx(assistantDiv, memoryCtx);
+    messages.push({ role: 'assistant', content: fullText });
+    if (memoryCtx && memoryCtx.tool_invoked) fetchStatus();
+  } catch (e) {
+    assistantDiv.classList.remove('typing');
+    contentEl.textContent = '错误: ' + e.message;
+  }
+  isStreaming = false; sendBtn.disabled = false; input.focus();
+}
+
+async function handleQueryCommand(query, mode) {
+  if (!query) {
+    addMessage('assistant', '用法: /' + mode + ' <查询文本>');
+    return;
+  }
+  var msg = addMessage('assistant', '正在查询...');
+  msg.querySelector('.content').textContent = '🔍 ' + mode + ': ' + query;
+  try {
+    var resp = await fetch('/api/memory/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query, mode: mode, top_k: 5 }),
+    });
+    var data = await resp.json();
+    var result = '';
+    if (data.associated_anchors && data.associated_anchors.length > 0) {
+      result += '关联锚点:\n';
+      for (var i = 0; i < data.associated_anchors.length; i++) {
+        var a = data.associated_anchors[i];
+        result += '  [' + a.label + '] density=' + a.density + ' impact=' + a.impact + '\n';
+      }
+    }
+    if (data.recalled_events && data.recalled_events.length > 0) {
+      result += '召回事件:\n';
+      for (var i = 0; i < data.recalled_events.length; i++) {
+        var e = data.recalled_events[i];
+        result += '  [' + e.anchor + '] ' + e.text + '\n';
+      }
+    }
+    if (!result) result = '(无结果)';
+    msg.querySelector('.content').textContent = result;
+  } catch (e) {
+    msg.querySelector('.content').textContent = '❌ 查询失败: ' + e.message;
+  }
+}
+
+async function showStatusInline() {
+  try {
+    var resp = await fetch('/api/memory/status');
+    var data = await resp.json();
+    var anchors = data.anchors || [];
+    var lines = [];
+    lines.push('库: ' + currentLibrary);
+    lines.push('锚点: ' + data.anchors_count + ' | 事件: ' + data.events_count + ' | 痕迹: ' + data.traces_count + ' | 种子: ' + data.seeds_count);
+    if (data.ecg) lines.push('张力: ' + data.ecg.field_tension.toFixed(4));
+    for (var i = 0; i < Math.min(anchors.length, 8); i++) {
+      lines.push('  ' + anchors[i].label + ' (d=' + anchors[i].density + ')');
+    }
+    addMessage('assistant', lines.join('\n'));
+  } catch (e) { addMessage('assistant', '获取状态失败: ' + e.message); }
+}
+
+function showHelp() {
+  var h = '可用命令:\n' +
+    '  /seed [描述]              进入记忆构建模式（唤起 LLM）\n' +
+    '  /recall <文本>             召回事件（别名: /r）\n' +
+    '  /associate <文本>          概念关联（别名: /a）\n' +
+    '  /status                   当前库状态（别名: /st）\n' +
+    '  /save / /load             持久化到磁盘\n' +
+    '  /help                     显示帮助\n\n' +
+    '记忆库管理: 点 header 的"管理"按钮';
+  addMessage('assistant', h);
 }
 
 function addMessage(role, content) {
-  const div = document.createElement('div');
+  var div = document.createElement('div');
   div.className = 'message ' + role;
-  div.innerHTML = '<div class="content">' + esc(content) + '</div><div class="meta">' + (role==='user'?'you':'fm') + ' &middot; ' + new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
+  var label = role === 'user' ? '你' : 'FM';
+  div.innerHTML = '<div class="content">' + esc(content) + '</div>' +
+    '<div class="meta">' + label + ' &middot; ' + new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
   msgEl.appendChild(div);
   msgEl.scrollTop = msgEl.scrollHeight;
   return div;
 }
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// === memory panel ===
-async function updateMemoryPanel() {
-  const panel = document.getElementById('memory-panel');
-  const content = document.getElementById('mem-content');
-  try {
-    const resp = await fetch('/api/memory/status');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    renderMemoryPanel(data);
-    document.body.classList.add('mem-active');
-    panel.style.display = '';
-  } catch (e) {
-    document.body.classList.remove('mem-active');
-    panel.style.display = '';
-    content.innerHTML = '<div class="mem-not-available">memory backend<br>not available</div>';
-    setTimeout(function () { panel.style.display = 'none'; }, 4000);
-  }
-}
-
-function renderMemoryPanel(data) {
-  const ecg = data.ecg || {};
-  const anchors = data.anchors || [];
-  const maxDensity = anchors.length > 0 ? Math.max.apply(null, anchors.map(function (a) { return a.density; })) : 1;
-  let html = '';
-
-  // ECG
-  html += '<div class="mem-section"><h3>ECG</h3>';
-  html += '<div class="mem-row"><span class="label">tension</span><span class="value">' + (ecg.field_tension != null ? Number(ecg.field_tension).toFixed(4) : '---') + '</span></div>';
-  html += '<div class="mem-row"><span class="label">convergence</span><span class="value">' + (ecg.convergence_rate != null ? Number(ecg.convergence_rate).toFixed(4) : '---') + '</span></div>';
-  html += '<div class="mem-row"><span class="label">anisotropy</span><span class="value">' + (ecg.anisotropy_magnitude != null ? Number(ecg.anisotropy_magnitude).toFixed(4) : '---') + '</span></div>';
-  html += '</div>';
-
-  // Stats
-  html += '<div class="mem-section"><h3>Stats</h3>';
-  html += '<div class="mem-row"><span class="label">anchors</span><span class="value">' + anchors.length + '</span></div>';
-  html += '<div class="mem-row"><span class="label">events</span><span class="value">' + (data.events_count || 0) + '</span></div>';
-  html += '<div class="mem-row"><span class="label">seeds</span><span class="value">' + (data.seeds_count || 0) + '</span></div>';
-  html += '</div>';
-
-  // Anchors list (max 15)
-  if (anchors.length > 0) {
-    html += '<div class="mem-section"><h3>Anchors</h3>';
-    for (let i = 0; i < Math.min(anchors.length, 15); i++) {
-      const a = anchors[i];
-      const pct = (a.density / maxDensity * 100).toFixed(0);
-      html += '<div class="mem-anchor-item">';
-      html += '<span class="mem-anchor-label">' + esc(a.label) + '</span>';
-      html += '<div class="mem-density-bar"><div class="mem-density-fill" style="width:' + pct + '%"></div></div>';
-      html += '<span class="mem-density-value">' + Number(a.density).toFixed(2) + '</span>';
-      html += '</div>';
+function renderMemoryCtx(assistantDiv, ctx) {
+  var toggle = document.createElement('div');
+  toggle.className = 'mem-ctx-toggle';
+  toggle.textContent = ctx.tool_invoked ? '已调用 tool' : '记忆注入详情';
+  var detail = document.createElement('div');
+  detail.className = 'mem-ctx-detail';
+  var h = '';
+  if (ctx.tool_invoked) h += '<div style="color:var(--accent);font-weight:500">tool 已被模型调用</div>';
+  if (ctx.system_prompt_line) h += '<div style="margin-top:4px"><span class="label">注入：</span>' + esc(ctx.system_prompt_line) + '</div>';
+  if (ctx.associations && ctx.associations.length) {
+    h += '<div style="margin-top:4px"><span class="label">关联：</span></div>';
+    for (var ai = 0; ai < ctx.associations.length; ai++) {
+      h += '<div class="item">  ' + esc(ctx.associations[ai].label) + ' (' + ctx.associations[ai].impact + ')</div>';
     }
-    html += '</div>';
   }
-
-  // Actions
-  html += '<div class="mem-section"><h3>Actions</h3>';
-  html += '<div class="mem-actions">';
-  html += '<button onclick="saveMemory()">save</button>';
-  html += '<button onclick="loadMemory()">load</button>';
-  html += '<button onclick="initMemory()">init</button>';
-  html += '</div></div>';
-
-  document.getElementById('mem-content').innerHTML = html;
+  if (ctx.recalled_events && ctx.recalled_events.length) {
+    h += '<div style="margin-top:4px"><span class="label">召回事件：</span></div>';
+    for (var ei = 0; ei < ctx.recalled_events.length; ei++) {
+      h += '<div class="item">  [' + esc(ctx.recalled_events[ei].anchor) + '] ' + esc(ctx.recalled_events[ei].text) + '</div>';
+    }
+  }
+  detail.innerHTML = h;
+  toggle.addEventListener('click', function() { toggle.classList.toggle('open'); detail.classList.toggle('open'); });
+  assistantDiv.appendChild(toggle);
+  assistantDiv.appendChild(detail);
 }
 
-async function saveMemory() {
+async function saveMem() {
   try {
-    await fetch('/api/memory/save', { method: 'POST' });
-  } catch (e) { console.error('save failed', e); }
+    var resp = await fetch('/api/memory/save', { method: 'POST' });
+    var data = await resp.json();
+    addMessage('assistant', data.ok ? '记忆已保存到磁盘。' : '保存失败：' + (data.error || '未知错误'));
+    fetchStatus();
+  } catch(e) { addMessage('assistant', '保存失败：' + e.message); }
 }
-
-async function loadMemory() {
+async function loadMem() {
   try {
-    await fetch('/api/memory/load', { method: 'POST' });
-    await updateMemoryPanel();
-  } catch (e) { console.error('load failed', e); }
+    var resp = await fetch('/api/memory/load', { method: 'POST' });
+    var data = await resp.json();
+    if (data.ok) addMessage('assistant', '已读取 ' + data.anchors_count + ' 锚点、' + data.events_count + ' 事件。');
+    else addMessage('assistant', '读取失败：' + (data.error || ''));
+    fetchStatus();
+  } catch(e) {}
 }
 
-function initMemory() {
-  const raw = prompt('Enter concepts (label:density), one per line:\ne.g.\ngreeting:1.0\nsyntax:0.8');
-  if (!raw) return;
-  const concepts = raw.split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return s; }).map(function (s) {
-    const parts = s.split(':');
-    return { label: (parts[0] || '').trim(), density: parseFloat(parts[1]) || 1.0 };
-  });
-  if (concepts.length === 0) return;
-  fetch('/api/memory/init', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ concepts: concepts })
-  }).then(updateMemoryPanel).catch(function (e) { console.error('init failed', e); });
-}
-
-// Load memory panel on page load
-updateMemoryPanel();
+// Init
+loadLibraryList();
+startPolling();
 </script>
 </body>
 </html>
+

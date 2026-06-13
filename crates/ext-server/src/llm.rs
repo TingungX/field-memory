@@ -9,25 +9,65 @@ use crate::routes::Message;
 /// Backend must support OpenAI-compatible chat completions with streaming.
 type SseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
+fn build_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+fn build_request(
+    client: &reqwest::Client,
+    backend_url: &str,
+) -> reqwest::RequestBuilder {
+    let mut req = client.post(backend_url);
+    if let Ok(api_key) = std::env::var("LLM_API_KEY") {
+        if !api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
+        }
+    }
+    req
+}
+
+/// Non-streaming chat completion — used for tool call detection.
+pub async fn chat_completion(
+    backend_url: &str,
+    model: &str,
+    messages: &[Message],
+    tools: Option<&[serde_json::Value]>,
+) -> Result<serde_json::Value, String> {
+    let client = build_client();
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+    });
+    if let Some(t) = tools {
+        body["tools"] = serde_json::json!(t);
+    }
+
+    let req = build_request(&client, backend_url).json(&body);
+    let resp = req.send().await.map_err(|e| format!("LLM request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("read response failed: {e}"))?;
+
+    if !status.is_success() {
+        return Err(format!("LLM returned HTTP {status}: {text}"));
+    }
+
+    serde_json::from_str(&text).map_err(|e| format!("parse response failed: {e}"))
+}
+
 pub async fn stream_chat(
     backend_url: &str,
     model: &str,
     messages: &[Message],
 ) -> SseStream {
-    let client = reqwest::Client::new();
-
+    let client = build_client();
     let body = serde_json::json!({
         "model": model,
         "messages": messages,
         "stream": true,
     });
 
-    let mut req = client.post(backend_url).json(&body);
-    if let Ok(api_key) = std::env::var("LLM_API_KEY") {
-        if !api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
-        }
-    }
+    let req = build_request(&client, backend_url).json(&body);
 
     let response = match req.send().await
     {

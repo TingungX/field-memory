@@ -1,6 +1,7 @@
 mod routes;
 mod llm;
 mod memory_routes;
+mod tools;
 
 use axum::Router;
 use field_mem_core::{DseEngine, DseCoreParams};
@@ -10,6 +11,10 @@ use tower_http::services::ServeDir;
 
 pub struct AppState {
     pub engine: Arc<Mutex<DseEngine>>,
+    /// Known libraries: name -> (anchors_count, events_count) snapshot
+    pub libraries: Arc<Mutex<std::collections::HashMap<String, (usize, usize)>>>,
+    /// Currently active library name
+    pub active_library: Arc<Mutex<String>>,
 }
 
 #[tokio::main]
@@ -32,6 +37,8 @@ async fn main() {
 
     let state = Arc::new(AppState {
         engine: Arc::new(Mutex::new(engine)),
+        libraries: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        active_library: Arc::new(Mutex::new("default".to_string())),
     });
 
     let app = Router::new()
@@ -42,6 +49,12 @@ async fn main() {
         .route("/api/memory/load", axum::routing::post(memory_routes::load))
         .route("/api/memory/ping", axum::routing::get(memory_routes::ping))
         .route("/api/memory/init", axum::routing::post(memory_routes::init))
+        .route("/api/memory/seed", axum::routing::post(memory_routes::seed))
+        .route("/api/memory/query", axum::routing::post(memory_routes::query))
+        .route("/api/memory/libraries", axum::routing::get(memory_routes::list_libraries))
+        .route("/api/memory/library/save", axum::routing::post(memory_routes::library_save))
+        .route("/api/memory/library/load", axum::routing::post(memory_routes::library_load))
+        .route("/api/memory/library/delete", axum::routing::post(memory_routes::library_delete))
         .fallback_service(ServeDir::new("crates/ext-server/src/static"))
         .layer(CorsLayer::permissive())
         .with_state(state);
