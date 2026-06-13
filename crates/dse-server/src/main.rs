@@ -23,7 +23,6 @@ async fn main() {
 
     let mut engine = DseEngine::new(params);
 
-    // Init with some base anchors so the engine isn't completely blank
     engine.init(&[
         ("代码质量和长期语义一致性", 12),
         ("偏好简洁直接的方案", 10),
@@ -41,8 +40,8 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("dse-server listening on http://0.0.0.0:3000");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:4000").await.unwrap();
+    println!("server listening on http://127.0.0.1:4000");
     axum::serve(listener, app).await.unwrap();
 }
 

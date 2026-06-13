@@ -1,4 +1,6 @@
-use crate::math::{cosine_similarity, cosine_distance, normalize, dot};
+#[cfg(test)]
+use crate::math::cosine_similarity;
+use crate::math::{cosine_distance, normalize, dot};
 use crate::types::{AnchorKey, SeedConcept, AnchorId, SeedId};
 
 /// Detect paradigm shift: two opposing anchors where pressure is heavily lopsided.
