@@ -1,71 +1,74 @@
 # AGENTS.md — DSE-Memory
 
-Project-local agent instructions. Complements (does not replace) any parent agent session configuration.
+项目级 agent 指令。不替代任何上级 agent session 配置。
 
-## Always applicable
+## 始终适用
 
-1. **Communicate in Chinese.** Preserve code, commands, errors in original language.
-2. **Prefer simple, direct, maintainable solutions.** Avoid over-engineering.
-3. **Stay consistent with existing code style.** Don't refactor unrelated code.
-4. **Never hardcode** secrets, tokens, or private URLs.
-5. **Never commit non-Rust build artifacts** — `/target`, `*.sled/`, `Cargo.lock` (currently in `.gitignore` for the workspace root, but `Cargo.lock` is intentionally **committed** because the workspace ships binaries).
+1. **使用中文沟通**。代码、命令、报错保留原文。
+2. **优先简单直接可维护的方案**。避免过度设计。
+3. **保持与现有代码风格一致**。非必要不重构无关代码。
+4. **禁止硬编码**密钥、Token、私密 URL。
+5. **禁止提交非 Rust 构建产物** — `/target`、`*.sled/`、`Cargo.lock`（`Cargo.lock` 由于 workspace 有二进制 crate，**已加入 git 跟踪**，不要从 `.gitignore` 中移除）。
 
-## Project structure
+## 项目结构
 
-- **Workspace root**: `Cargo.toml`, two members under `crates/`
-- **`crates/dse-core/`**: library crate, all engine logic in `src/*.rs` (one module per concern: `types`, `math`, `embed`, `physics`, `cycle`, `recall`, `init`, `paradigm`, `ecg`, `engine`, `persist`)
-- **`crates/dse-cli/`**: binary crate, end-to-end demo driver
-- **`docs/design.md`**: v2 architecture rationale (read this before proposing non-trivial changes)
-- **`docs/superpowers/plans/`**: TDD plans with checkbox tracking; each plan file is the authoritative spec for its phase
+```
+MEMORY/
+├── Cargo.toml                 # workspace，3 个 member
+├── crates/
+│   ├── dse-core/              # 核心引擎 (library)
+│   │   └── src/*.rs           # 每文件一职责
+│   ├── dse-cli/               # 命令行 demo (binary)
+│   └── dse-server/            # HTTP 聊天服务器 (binary)
+│       └── src/static/index.html  # 前端单页
+├── docs/
+│   ├── design.md              # v2 架构文档（改动前必读）
+│   └── superpowers/plans/     # TDD 实现计划
+└── .gitignore
+```
 
-## Engineering conventions
+## 工程规约
 
-- **5 config params only** — `DseCoreParams` is a frozen surface, not a config dump. New params require a plan update.
-- **One file, one concern** — each `src/*.rs` has exactly one responsibility. Don't bleed physics into `cycle.rs` or recall into `engine.rs`.
-- **No business logic in `engine.rs`** — `DseEngine` is an orchestrator only. Algorithm changes belong in `physics.rs`, `cycle.rs`, etc.
-- **`pub use` re-exports in `lib.rs`** are intentional public surface. Don't change them without updating downstream callers.
+- **5 个配置参数** — `DseCoreParams` 只增不减需要计划更新。
+- **一文件一职责** — 不跨模块泄漏职责（physics 不写 cycle 逻辑，cycle 不写 recall 逻辑）。
+- **`engine.rs` 只做编排** — 算法改动在 `physics.rs` / `cycle.rs` / `recall.rs`。
+- **`lib.rs` 的 re-export 是公开 API** — 改动需要同步更新全部 downstream。
 
-## Testing conventions
+## 测试规约
 
-- **Inline `#[cfg(test)] mod tests`** in the same file as the implementation. No separate `tests/` files for unit tests.
-- **`tests/integration.rs`** for end-to-end multi-module scenarios.
-- **Test names**: `test_<function_or_behavior>_<expected_outcome>`. Use Chinese-language test data when the production code is Chinese-aware (e.g., `init_anchors` label extraction).
-- **Plan tests that depend on the hash-based `DummyEmbedProvider`** are inherently flaky (see "Lessons learned" below). Two such tests are currently marked `#[ignore]`. Do not "fix" them by changing the math; either inject a real `EmbedProvider` or accept them as plan-level design issues.
+- **内联 `#[cfg(test)] mod tests`** — 单元测试和实现写在一起。
+- **`tests/integration.rs`** — 跨模块端到端测试。
+- **测试命名**：`test_<功能或行为>_<预期结果>`。
+- **依赖 `DummyEmbedProvider` 的测试天然不稳定** — 标记 `#[ignore]` 并写注释，不要"修正"数学来曲线救国。接入真实 `EmbedProvider` 才能确定性地通过。
 
-## Output conventions
+## 输出规约
 
-- First **state what was done**, then **explain why**.
-- List modified files explicitly.
-- For non-trivial changes, also list **plan-level impacts** (which `DseCoreParams` are touched, which public API changes, which persistence format version).
+- 先说做了什么，再解释为什么。
+- 列出修改文件。
+- 非平凡改动同时列出 plan / public API / 持久化格式变更。
 
-## Engineering preferences
+## 调试 / 修复规约
 
-- **No magic numbers** in production code — extract constants or add named fields to `DseCoreParams`.
-- **Reuse `crate::math::*` helpers** rather than reimplementing vector ops in each module.
-- **Snapshot before mutating** when you need to call a function that borrows immutably while iterating mutably. The `RelaxationCycle::run` pattern in `cycle.rs` is the reference implementation.
+- **先找根因再改代码**。不要用 `unwrap_or_default` 吞 panic，不要注释代码路径。
+- **Plan 优先**。如果发现计划文件有内部矛盾，先改计划，单独提交，再实现。
+- **无法验证的测试标记 `#[ignore]` + 注释原因**。不删除——它们记录了设计意图。
 
-## Debug / fix conventions
+## 已记录教训
 
-- **Root cause first.** Don't suppress panics with `unwrap_or_default` or comment out code paths.
-- **Plan vs. code drift.** If you discover the plan file (`docs/superpowers/plans/*.md`) has an internal contradiction, **fix the plan first**, then commit the plan fix in its own commit before implementing. This keeps `git log` honest about what the plan was vs. what the code is.
-- **Mark unverifiable tests `#[ignore]` with a comment** explaining *why*. Don't delete them — they document plan intent.
+以下教训来自 Phase 1 的真实调试。修改相似代码前必读。
 
-## Lessons learned (do not repeat)
+1. **`lib.rs` 的 re-export 不可引用不存在的模块**。workspace scaffold 阶段先做骨架或推迟 re-export 到目标模块创建时。
+2. **`bincode 1.x` 中 `bincode::Error` 是 `Box<bincode::ErrorKind>`**。`PersistError` 用 `#[from] bincode::Error` 会编译失败，改用 `Serialization(String)` 手动 map。
+3. **`sled::Error::Unsupported` 不接受字符串参数**。改用自定义 `MissingData(&'static str)` 变体。
+4. **`use` 列表必须包含全部引用类型**。Rust 的 dead-code 检查不覆盖类型推导路径。
+5. **`Vec.remove()` 后不能复用之前绑定的 `n`**。索引越界。移除后立即 `return` 而不是 `break`。
+6. **`DummyEmbedProvider` 基于哈希，不是语义**。相关中文文本可能产出正交向量。断言密度增长"同一主题提到多次→密度更高"需要真实 `EmbedProvider`。
+7. **`cos_sim(正交方向) = 0 → impact = 0 → effective_direction = 事件原方向**。测试"锚点拉动事件方向"的用例如果输入正交方向，数学上不可满足。
 
-These were paid for in real debugging time during Phase 1. Read them before changing similar code.
+## 有疑问时
 
-1. **`lib.rs` re-exports must not reference symbols from sibling modules that don't yet exist** — the workspace scaffold (`Task 1`) writes re-exports like `pub use engine::DseEngine;`, but if those targets don't exist yet, `cargo check` fails. Either forward-declare or postpone re-exports to the task that introduces the target.
-2. **`bincode::Error` in 1.x is `Box<bincode::ErrorKind>`, not `bincode::Error`.** If you write a `PersistError` with `#[from] bincode::Error`, the build fails. Map to a `Serialization(String)` variant manually.
-3. **`sled::Error::Unsupported(...)` API does not take a string argument.** Use a custom `MissingData(&'static str)` variant instead.
-4. **`use` lists in `cycle.rs` / `paradigm.rs` / `recall.rs` must include every type referenced**, including those only used in fn signatures or full-path call sites. The borrow checker + dead-code pass will catch some, but not all.
-5. **Two `detect_paradigm_shifts` bugs caught at the plan level**: (a) let-bound `n` reused after `Vec::remove` causes index-out-of-bounds panic; (b) `break` only exits the inner loop, violating the "one shift per cycle" comment. Use `return` (not `break`) after `remove(j)`.
-6. **`DummyEmbedProvider` is hash-based, not semantic.** Two semantically related Chinese strings ("Rust 编程语言" vs "Rust 的类型系统真强大") produce near-orthogonal vectors with high probability. Any test that asserts density growth from "more mentions of a topic" needs a real `EmbedProvider` to be deterministic.
-7. **`orthogonal event + orthogonal anchor` cannot satisfy pull-style tests.** `cos_sim(orthogonal) = 0`, so `impact = 0`, so `effective_direction` adds zero contribution. Plan tests that assert "anchor pulls event toward it" with orthogonal directions are mathematically unsatisfiable.
-
-## When in doubt
-
-1. Read `docs/design.md` to understand the *why* before touching the *what*.
-2. Read the most recent plan in `docs/superpowers/plans/` for task-level context.
-3. Read at least 3 sibling files in `crates/dse-core/src/` to understand the local style.
-4. If a change touches public API or persistence format, update the plan AND the design doc in the same commit (or in two coordinated commits).
+1. 先读 `docs/design.md` 理解 why，再动 what。
+2. 读 `docs/superpowers/plans/` 中最新的计划文件获取 task 上下文。
+3. 至少读 3 个 `crates/dse-core/src/` 中的同层文件理解风格。
+4. 如果改动影响 public API 或持久化格式，在同一个 commit 中更新 `docs/design.md`。
 
