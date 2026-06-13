@@ -1,0 +1,8 @@
+[package]
+name = "dse-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dse-core = { path = "../dse-core" }
+
