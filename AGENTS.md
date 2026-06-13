@@ -1,6 +1,40 @@
 # AGENTS.md — DSE-Memory
 
-## 项目结构
+## 设计意图
+
+DSE-Memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是：
+
+- 记忆不是静态存储，是系统被事件扰动后收敛到的**平衡态**
+- 概念的意义由关联事件的**空间密度**动态赋予，不由硬编码标签决定
+- 系统拒绝分类与判断。没有 Gap、Valence、Emotion、RecallStamp。所有行为从**一个物理量**涌现
+
+核心方程：
+
+```
+impact(anchor, event) = cos_sim(anchor.direction, event.direction) * sqrt(anchor.density)
+```
+
+范式转移、ECG、召回、持久化全部由此推导。
+
+## 核心元素
+
+| 结构体 | 角色 | 关键字段 |
+|---|---|---|
+| `Event` | 输入到场的唯一信号 | direction, text, timestamp |
+| `AnchorKey` | 记忆场的节点 | direction, density, stiffness, damping, origin_direction |
+| `ImpactTrace` | 松弛副产品，召回用 | event_id, anchor_id, impact, timestamp |
+| `SeedConcept` | L4 静默种子 | orthogonal_direction, shadow_anchor, defeated_by |
+
+锚点的 `stiffness` 和 `damping` 由 `density` 自动推导：
+
+```
+stiffness = sqrt(density)
+damping   = 1 / sqrt(density)
+```
+
+密度越高，锚点越难被推动（stiffness 高）且越难忘（damping 低）。
+
+## 架构
 
 ```
 MEMORY/
@@ -16,6 +50,17 @@ MEMORY/
 │   └── superpowers/plans/     # TDD 实现计划
 └── .gitignore
 ```
+
+## 设计亮点
+
+| 亮点 | 说明 |
+|---|---|
+| 无 LLM 判定 | Event 输入只有 `text → embedding → direction`，不调用 LLM 做 gap/情绪/概念分类 |
+| 唯一演化入口 | `RelaxationCycle.run()` 是场状态变化的唯一下降。没有额外的 reconsolidate / time_collapse / scan_dormancy 函数 |
+| 四层 = 四个参数组 | L1-L4 没有独立数据结构。stiffness + damping 的取值自然决定一个 anchor 是"短期工作记忆"还是"长期核心信念" |
+| 召回 = 写入同广播 | 查询和事件走同一个 `impact()` 函数，回忆加固只是查询作为轻事件走了步轻松弛 |
+| 范式转移 = 唯一结构变换 | shadow_anchor 保留完整快照，L4 到 L3 的恢复是无损的 |
+| 5 个参数 | 向量维度、时间窗口、阻尼系数、刚度系数、收敛阈值。所有内部参数由此推导 |
 
 ## 工程规约
 
