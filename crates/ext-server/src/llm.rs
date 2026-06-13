@@ -22,11 +22,14 @@ pub async fn stream_chat(
         "stream": true,
     });
 
-    let response = match client
-        .post(backend_url)
-        .json(&body)
-        .send()
-        .await
+    let mut req = client.post(backend_url).json(&body);
+    if let Ok(api_key) = std::env::var("LLM_API_KEY") {
+        if !api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
+        }
+    }
+
+    let response = match req.send().await
     {
         Ok(r) => r,
         Err(e) => {

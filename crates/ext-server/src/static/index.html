@@ -3,212 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DSE Chat</title>
+<title>field-memory chat</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-
 :root {
-  --bg: #f5f4f0;
-  --surface: #ffffff;
-  --text: #1a1a1a;
-  --text-muted: #6b6b6b;
-  --user-bubble: #e8edf4;
-  --user-text: #1a1a1a;
-  --border: #e0ddd8;
-  --input-bg: #ffffff;
-  --send-bg: #1a1a1a;
-  --send-text: #ffffff;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --bg: #f5f4f0; --surface: #fff; --text: #1a1a1a; --text-muted: #6b6b6b;
+  --user-bubble: #e8edf4; --border: #e0ddd8; --font: -apple-system, system-ui, sans-serif;
 }
-
-body {
-  font-family: var(--font);
-  background: var(--bg);
-  color: var(--text);
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* Header */
-header {
-  flex-shrink: 0;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-header h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text);
-}
-
-header .status {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-/* Messages area */
-#messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  scroll-behavior: smooth;
-}
-
-#messages::-webkit-scrollbar { width: 4px; }
-#messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-/* Message bubbles */
-.message {
-  display: flex;
-  flex-direction: column;
-  max-width: 72%;
-  animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity:0; transform: translateY(8px); }
-  to { opacity:1; transform: translateY(0); }
-}
-
-.message.user {
-  align-self: flex-end;
-}
-
-.message.assistant {
-  align-self: flex-start;
-}
-
-.message .content {
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.message.user .content {
-  background: var(--user-bubble);
-  color: var(--user-text);
-  border-bottom-right-radius: 4px;
-}
-
-.message.assistant .content {
-  background: transparent;
-  color: var(--text);
-  padding-left: 0;
-}
-
-.message .meta {
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  padding: 0 4px;
-}
-
-.message.user .meta { text-align: right; }
-
-/* Typing indicator */
-.typing .content {
-  color: var(--text-muted) !important;
-  font-style: italic;
-}
-
-/* Input area */
-#input-area {
-  flex-shrink: 0;
-  padding: 16px 24px 24px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-#input-area textarea {
-  flex: 1;
-  resize: none;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 16px;
-  font-size: 14px;
-  font-family: var(--font);
-  line-height: 1.5;
-  background: var(--input-bg);
-  color: var(--text);
-  outline: none;
-  max-height: 120px;
-  transition: border-color 0.15s;
-}
-
-#input-area textarea:focus {
-  border-color: #888;
-}
-
-#input-area button {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  border: none;
-  background: var(--send-bg);
-  color: var(--send-text);
-  cursor: pointer;
-  font-size: 14px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.15s;
-}
-
-#input-area button:hover { opacity: 0.85; }
-#input-area button:disabled { opacity: 0.4; cursor: default; }
-
-/* Welcome placeholder */
-.welcome {
-  align-self: center;
-  text-align: center;
-  color: var(--text-muted);
-  margin-top: 10vh;
-  font-size: 13px;
-  line-height: 1.8;
-}
-
-.welcome strong {
-  color: var(--text);
-  font-weight: 500;
-}
+body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+header { flex-shrink:0; padding:10px 20px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+header h1 { font-size:14px; font-weight:600; margin-right:auto; }
+header select, header input { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font-family:var(--font); }
+header input { width:200px; }
+#messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:16px; }
+.message { display:flex; flex-direction:column; max-width:72%; animation:fadeIn .2s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.message.user { align-self:flex-end; }
+.message.assistant { align-self:flex-start; }
+.message .content { padding:10px 14px; border-radius:10px; font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+.message.user .content { background:var(--user-bubble); color:var(--text); border-bottom-right-radius:3px; }
+.message.assistant .content { background:transparent; color:var(--text); padding-left:0; }
+.message .meta { font-size:10px; color:var(--text-muted); margin-top:3px; padding:0 3px; }
+.message.user .meta { text-align:right; }
+.typing .content { color:var(--text-muted) !important; }
+#input-area { flex-shrink:0; padding:14px 20px 20px; background:var(--surface); border-top:1px solid var(--border); display:flex; gap:8px; align-items:flex-end; }
+#input-area textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:14px; font-family:var(--font); line-height:1.5; background:var(--surface); color:var(--text); outline:none; transition:border-color .15s; }
+#input-area textarea:focus { border-color:#888; }
+#input-area button { width:36px; height:36px; border-radius:8px; border:none; background:#1a1a1a; color:#fff; cursor:pointer; font-size:13px; flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:opacity .15s; }
+#input-area button:hover { opacity:.85; }
+#input-area button:disabled { opacity:.4; cursor:default; }
+.welcome { align-self:center; text-align:center; color:var(--text-muted); margin-top:10vh; font-size:13px; line-height:1.8; }
+.welcome strong { color:var(--text); font-weight:500; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>DSE Chat</h1>
-  <span class="status" id="status">ready</span>
+  <h1>field-memory</h1>
+  <select id="model-select">
+    <option value="test-model-1">test-model-1</option>
+    <option value="test-model-2">test-model-2</option>
+  </select>
+  <input id="api-key" type="password" placeholder="api key (sk-fm)" value="sk-fm">
+  <input id="backend-url" type="text" placeholder="base url" value="http://127.0.0.1:4000">
 </header>
 
 <div id="messages">
   <div class="welcome">
-    <strong>DSE Memory Chat</strong><br>
-    powered by dynamic semantic evolutionary memory
+    <strong>field-memory chat</strong><br>
+    testing field-memory on your own LLM backend
   </div>
 </div>
 
 <div id="input-area">
-  <textarea id="user-input" rows="1" placeholder="Type a message..." onkeydown="handleKey(event)"></textarea>
+  <textarea id="user-input" rows="1" placeholder="type a message..." onkeydown="handleKey(event)"></textarea>
   <button id="send-btn" onclick="send()">
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
       <line x1="2" y1="8" x2="14" y2="8"/>
       <polyline points="10,4 14,8 10,12"/>
     </svg>
@@ -216,22 +66,17 @@ header .status {
 </div>
 
 <script>
-const API = '/v1/chat/completions';
-
 let messages = [];
 let isStreaming = false;
-
 const msgEl = document.getElementById('messages');
 const input = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
-const status = document.getElementById('status');
+const modelSelect = document.getElementById('model-select');
+const apiKeyInput = document.getElementById('api-key');
+const urlInput = document.getElementById('backend-url');
 
 function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    send();
-  }
-  // Auto-resize
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 120) + 'px';
 }
@@ -239,39 +84,34 @@ function handleKey(e) {
 async function send() {
   const text = input.value.trim();
   if (!text || isStreaming) return;
+  input.value = ''; input.style.height = 'auto';
+  isStreaming = true; sendBtn.disabled = true;
 
-  input.value = '';
-  input.style.height = 'auto';
-  isStreaming = true;
-  sendBtn.disabled = true;
-  status.textContent = 'thinking...';
-
-  // Remove welcome
   const welcome = msgEl.querySelector('.welcome');
   if (welcome) welcome.remove();
 
-  // Add user message
   addMessage('user', text);
   messages.push({ role: 'user', content: text });
 
-  // Create assistant bubble placeholder
   const assistantDiv = addMessage('assistant', '');
   assistantDiv.classList.add('typing');
   const contentEl = assistantDiv.querySelector('.content');
   contentEl.textContent = '...';
 
+  const baseUrl = urlInput.value.replace(/\/$/, '');
   try {
-    const resp = await fetch(API, {
+    const resp = await fetch(baseUrl + '/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, stream: true }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKeyInput.value,
+      },
+      body: JSON.stringify({ messages, model: modelSelect.value, stream: true }),
     });
-
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
 
     assistantDiv.classList.remove('typing');
     let fullText = '';
-
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -280,50 +120,35 @@ async function send() {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
-
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
+        const t = line.trim();
+        if (!t.startsWith('data: ')) continue;
+        const data = t.slice(6);
         if (data === '[DONE]') break;
-
         fullText += data;
         contentEl.textContent = fullText;
         msgEl.scrollTop = msgEl.scrollHeight;
       }
     }
-
     messages.push({ role: 'assistant', content: fullText });
-    status.textContent = 'ready';
   } catch (e) {
     assistantDiv.classList.remove('typing');
-    contentEl.textContent = `Error: ${e.message}`;
-    status.textContent = 'error';
+    contentEl.textContent = 'Error: ' + e.message;
   }
-
-  isStreaming = false;
-  sendBtn.disabled = false;
-  input.focus();
+  isStreaming = false; sendBtn.disabled = false; input.focus();
 }
 
 function addMessage(role, content) {
   const div = document.createElement('div');
-  div.className = `message ${role}`;
-  div.innerHTML = `
-    <div class="content">${escapeHtml(content)}</div>
-    <div class="meta">${role === 'user' ? 'you' : 'dse'} &middot; ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
-  `;
+  div.className = 'message ' + role;
+  div.innerHTML = '<div class="content">' + esc(content) + '</div><div class="meta">' + (role==='user'?'you':'fm') + ' &middot; ' + new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + '</div>';
   msgEl.appendChild(div);
   msgEl.scrollTop = msgEl.scrollHeight;
   return div;
 }
-
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
 </body>
 </html>

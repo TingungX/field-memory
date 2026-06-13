@@ -17,8 +17,9 @@
 cargo run -p dse-cli
 
 # 启动聊天服务器
-LLM_BACKEND=http://localhost:11434/v1/chat/completions \
-LLM_MODEL=qwen2.5:0.5b \
+LLM_BACKEND=https://api.deepseek.com/v1/chat/completions \
+LLM_MODEL=deepseek-chat \
+LLM_API_KEY=sk-your-key-here \
 cargo run -p dse-server
 ```
 
@@ -74,4 +75,3 @@ cargo run -p dse-server
 Copyright (C) 2026 Tingung <TingungX@outlook.com>
 
 **GNU Affero General Public License v3.0** — 如果你将本引擎作为网络服务提供修改版本，必须向服务用户提供修改后的源代码。
-
