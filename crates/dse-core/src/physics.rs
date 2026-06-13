@@ -1,5 +1,5 @@
 use crate::math::{cosine_similarity, normalize, add, scale};
-use crate::types::{Vector, AnchorKey, Event};
+use crate::types::{Vector, AnchorKey};
 
 /// The ONE core equation: impact of an event on an anchor.
 /// impact = cos_sim(event_dir, anchor_dir) × √density
