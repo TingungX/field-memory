@@ -9,11 +9,15 @@ use crate::AppState;
 #[derive(serde::Serialize)]
 pub(crate) struct AnchorBrief {
     label: String,
+    /// Stable anchor id (hash of direction at creation) — for client references
+    id: String,
     density: u32,
     stiffness: f32,
     damping: f32,
-    /// 2D projection of direction (first 2 components normalized) — for visualization
+    /// 2D projection of direction (first 2 components) — for 2D inline viz
     direction_xy: [f32; 2],
+    /// Full direction vector (32-dim unit) — for 3D / PCA projection on the client
+    direction_n: Vec<f32>,
 }
 
 #[derive(serde::Serialize)]
@@ -170,11 +174,13 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<MemoryStatus> {
                 a.direction.get(1).copied().unwrap_or(0.0),
             ];
             AnchorBrief {
+                id: format!("a{}", a.id.0),
                 label: a.label.clone(),
                 density: a.density,
                 stiffness: a.stiffness,
                 damping: a.damping,
                 direction_xy,
+                direction_n: a.direction.clone(),
             }
         })
         .collect();

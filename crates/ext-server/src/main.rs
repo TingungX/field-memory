@@ -7,7 +7,7 @@ use axum::Router;
 use field_mem_core::{DseEngine, DseCoreParams};
 use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub struct AppState {
     pub engine: Arc<Mutex<DseEngine>>,
@@ -55,6 +55,8 @@ async fn main() {
         .route("/api/memory/library/save", axum::routing::post(memory_routes::library_save))
         .route("/api/memory/library/load", axum::routing::post(memory_routes::library_load))
         .route("/api/memory/library/delete", axum::routing::post(memory_routes::library_delete))
+        // Dedicated 3D field visualization page
+        .route("/field", axum::routing::get_service(ServeFile::new("crates/ext-server/src/static/field.html")))
         .fallback_service(ServeDir::new("crates/ext-server/src/static"))
         .layer(CorsLayer::permissive())
         .with_state(state);
