@@ -1,4 +1,4 @@
-use dse_core::{DseEngine, DseCoreParams};
+use field_mem_core::{DseEngine, DseCoreParams};
 
 #[test]
 fn test_full_cycle_temporal_recall() {

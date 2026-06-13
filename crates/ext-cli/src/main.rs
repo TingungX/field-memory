@@ -1,4 +1,4 @@
-use dse_core::{DseEngine, DseCoreParams};
+use field_mem_core::{DseEngine, DseCoreParams};
 
 fn main() {
     println!("=== DSE-Memory CLI Demo ===\n");
@@ -92,4 +92,3 @@ fn main() {
 
     println!("=== Demo Complete ===");
 }
-

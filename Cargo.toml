@@ -1,8 +1,9 @@
 [workspace]
-members = ["crates/dse-core", "crates/dse-cli", "crates/dse-server"]
+members = ["crates/core/field-mem-core", "crates/ext-cli", "crates/ext-server"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
+

@@ -2,7 +2,7 @@ mod routes;
 mod llm;
 
 use axum::Router;
-use dse_core::{DseEngine, DseCoreParams};
+use field_mem_core::{DseEngine, DseCoreParams};
 use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
@@ -44,4 +44,3 @@ async fn main() {
     println!("server listening on http://127.0.0.1:4000");
     axum::serve(listener, app).await.unwrap();
 }
-
