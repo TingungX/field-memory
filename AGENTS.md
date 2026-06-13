@@ -1,8 +1,8 @@
-# AGENTS.md — DSE-Memory
+# AGENTS.md — field-memory
 
 ## 设计意图
 
-DSE-Memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是：
+field-memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是：
 
 - 记忆不是静态存储，是系统被事件扰动后收敛到的**平衡态**
 - 概念的意义由关联事件的**空间密度**动态赋予，不由硬编码标签决定
@@ -86,4 +86,3 @@ MEMORY/
 5. **`Vec.remove()` 后不能复用之前绑定的 `n`**。移除后 `return` 不是 `break`。
 6. **`DummyEmbedProvider` 基于哈希，不是语义**。相关文本可能产出正交向量。
 7. **`cos_sim(正交) = 0 → impact = 0 → effective_direction = 事件原方向**。
-

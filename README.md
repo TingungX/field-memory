@@ -1,6 +1,6 @@
-# DSE-Memory
+# field-memory
 
-**Dynamic Semantic Evolutionary Memory** — 统一势能场记忆引擎。
+**统一势能场记忆引擎。**
 
 > 概念的意义由其关联事件的空间密度分布动态赋予。
 > 记忆不是数据库，是松弛系统。状态不是"写入"，是连续平衡被扰动后的收敛结果。
@@ -8,7 +8,7 @@
 
 ## 核心理念
 
-DSE-Memory 抛弃了传统的"向量数据库 + RAG"路线。系统中的每个概念（Anchor）和每个事件（Event）都活在同一张势能场里。回忆是**松弛过程**：查询向量广播到所有锚点，方向相近且密度高的锚点产生引力，场向查询方向收敛。记忆是系统的平衡态，不是查表。
+field-memory 抛弃了传统的"向量数据库 + RAG"路线。系统中的每个概念（Anchor）和每个事件（Event）都活在同一张势能场里。回忆是**松弛过程**：查询向量广播到所有锚点，方向相近且密度高的锚点产生引力，场向查询方向收敛。记忆是系统的平衡态，不是查表。
 
 核心方程只有一行：
 
@@ -111,4 +111,3 @@ GNU Affero General Public License v3.0 (AGPL-3.0)
 - `docs/design.md` — v2 精简架构设计（统一势能场的完整逻辑推导）
 - `docs/superpowers/plans/2026-06-13-dse-phase1.md` — Phase 1 实现计划（14 个 TDD 任务）
 - `AGENTS.md` — 项目级 agent 指令
-
