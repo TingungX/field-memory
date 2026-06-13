@@ -1,5 +1,6 @@
 mod routes;
 mod llm;
+mod memory_routes;
 
 use axum::Router;
 use field_mem_core::{DseEngine, DseCoreParams};
@@ -36,11 +37,18 @@ async fn main() {
     let app = Router::new()
         .route("/v1/chat/completions", axum::routing::post(routes::chat_completions))
         .route("/v1/messages", axum::routing::post(routes::messages))
-        .fallback_service(ServeDir::new("crates/dse-server/src/static"))
+        .route("/api/memory/status", axum::routing::get(memory_routes::status))
+        .route("/api/memory/save", axum::routing::post(memory_routes::save))
+        .route("/api/memory/load", axum::routing::post(memory_routes::load))
+        .route("/api/memory/ping", axum::routing::get(memory_routes::ping))
+        .route("/api/memory/init", axum::routing::post(memory_routes::init))
+        .fallback_service(ServeDir::new("crates/ext-server/src/static"))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:4000").await.unwrap();
-    println!("server listening on http://127.0.0.1:4000");
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5000".into());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    println!("server listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 }

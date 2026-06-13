@@ -34,6 +34,106 @@ header input { width:200px; }
 #input-area button:disabled { opacity:.4; cursor:default; }
 .welcome { align-self:center; text-align:center; color:var(--text-muted); margin-top:10vh; font-size:13px; line-height:1.8; }
 .welcome strong { color:var(--text); font-weight:500; }
+
+/* === memory panel === */
+#memory-panel {
+  position: fixed;
+  right: 0;
+  top: 53px;
+  bottom: 0;
+  width: 280px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 14px;
+  overflow-y: auto;
+  font-size: 12px;
+  z-index: 100;
+  display: none;
+}
+#memory-panel h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.mem-section { margin-bottom: 16px; }
+.mem-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+.mem-row .label { color: var(--text-muted); }
+.mem-row .value { font-weight: 500; }
+.mem-anchor-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.mem-anchor-label {
+  flex-shrink: 0;
+  min-width: 60px;
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mem-density-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mem-density-fill {
+  height: 100%;
+  background: #6b6b6b;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.mem-density-value {
+  flex-shrink: 0;
+  width: 40px;
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.mem-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mem-actions button {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.mem-actions button:hover { background: var(--bg); }
+.mem-not-available {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 40px 0;
+  line-height: 1.6;
+}
+
+body.mem-active #messages,
+body.mem-active #input-area {
+  margin-right: 280px;
+}
+
+@media (max-width: 800px) {
+  body.mem-active #messages,
+  body.mem-active #input-area { margin-right: 0; }
+  #memory-panel { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -47,6 +147,10 @@ header input { width:200px; }
   <input id="api-key" type="password" placeholder="api key (sk-fm)" value="sk-fm">
   <input id="backend-url" type="text" placeholder="base url" value="http://127.0.0.1:4000">
 </header>
+
+<div id="memory-panel">
+  <div id="mem-content"><div class="mem-not-available">loading&hellip;</div></div>
+</div>
 
 <div id="messages">
   <div class="welcome">
@@ -138,6 +242,7 @@ async function send() {
     contentEl.textContent = 'Error: ' + e.message;
   }
   isStreaming = false; sendBtn.disabled = false; input.focus();
+  updateMemoryPanel();
 }
 
 function addMessage(role, content) {
@@ -149,7 +254,102 @@ function addMessage(role, content) {
   return div;
 }
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// === memory panel ===
+async function updateMemoryPanel() {
+  const panel = document.getElementById('memory-panel');
+  const content = document.getElementById('mem-content');
+  try {
+    const resp = await fetch('/api/memory/status');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    renderMemoryPanel(data);
+    document.body.classList.add('mem-active');
+    panel.style.display = '';
+  } catch (e) {
+    document.body.classList.remove('mem-active');
+    panel.style.display = '';
+    content.innerHTML = '<div class="mem-not-available">memory backend<br>not available</div>';
+    setTimeout(function () { panel.style.display = 'none'; }, 4000);
+  }
+}
+
+function renderMemoryPanel(data) {
+  const ecg = data.ecg || {};
+  const anchors = data.anchors || [];
+  const maxDensity = anchors.length > 0 ? Math.max.apply(null, anchors.map(function (a) { return a.density; })) : 1;
+  let html = '';
+
+  // ECG
+  html += '<div class="mem-section"><h3>ECG</h3>';
+  html += '<div class="mem-row"><span class="label">tension</span><span class="value">' + (ecg.field_tension != null ? Number(ecg.field_tension).toFixed(4) : '---') + '</span></div>';
+  html += '<div class="mem-row"><span class="label">convergence</span><span class="value">' + (ecg.convergence_rate != null ? Number(ecg.convergence_rate).toFixed(4) : '---') + '</span></div>';
+  html += '<div class="mem-row"><span class="label">anisotropy</span><span class="value">' + (ecg.anisotropy_magnitude != null ? Number(ecg.anisotropy_magnitude).toFixed(4) : '---') + '</span></div>';
+  html += '</div>';
+
+  // Stats
+  html += '<div class="mem-section"><h3>Stats</h3>';
+  html += '<div class="mem-row"><span class="label">anchors</span><span class="value">' + anchors.length + '</span></div>';
+  html += '<div class="mem-row"><span class="label">events</span><span class="value">' + (data.events_count || 0) + '</span></div>';
+  html += '<div class="mem-row"><span class="label">seeds</span><span class="value">' + (data.seeds_count || 0) + '</span></div>';
+  html += '</div>';
+
+  // Anchors list (max 15)
+  if (anchors.length > 0) {
+    html += '<div class="mem-section"><h3>Anchors</h3>';
+    for (let i = 0; i < Math.min(anchors.length, 15); i++) {
+      const a = anchors[i];
+      const pct = (a.density / maxDensity * 100).toFixed(0);
+      html += '<div class="mem-anchor-item">';
+      html += '<span class="mem-anchor-label">' + esc(a.label) + '</span>';
+      html += '<div class="mem-density-bar"><div class="mem-density-fill" style="width:' + pct + '%"></div></div>';
+      html += '<span class="mem-density-value">' + Number(a.density).toFixed(2) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // Actions
+  html += '<div class="mem-section"><h3>Actions</h3>';
+  html += '<div class="mem-actions">';
+  html += '<button onclick="saveMemory()">save</button>';
+  html += '<button onclick="loadMemory()">load</button>';
+  html += '<button onclick="initMemory()">init</button>';
+  html += '</div></div>';
+
+  document.getElementById('mem-content').innerHTML = html;
+}
+
+async function saveMemory() {
+  try {
+    await fetch('/api/memory/save', { method: 'POST' });
+  } catch (e) { console.error('save failed', e); }
+}
+
+async function loadMemory() {
+  try {
+    await fetch('/api/memory/load', { method: 'POST' });
+    await updateMemoryPanel();
+  } catch (e) { console.error('load failed', e); }
+}
+
+function initMemory() {
+  const raw = prompt('Enter concepts (label:density), one per line:\ne.g.\ngreeting:1.0\nsyntax:0.8');
+  if (!raw) return;
+  const concepts = raw.split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return s; }).map(function (s) {
+    const parts = s.split(':');
+    return { label: (parts[0] || '').trim(), density: parseFloat(parts[1]) || 1.0 };
+  });
+  if (concepts.length === 0) return;
+  fetch('/api/memory/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ concepts: concepts })
+  }).then(updateMemoryPanel).catch(function (e) { console.error('init failed', e); });
+}
+
+// Load memory panel on page load
+updateMemoryPanel();
 </script>
 </body>
 </html>
-
