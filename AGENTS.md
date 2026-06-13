@@ -43,6 +43,13 @@ field-memory/
 │   │       └── src/*.rs
 │   ├── ext-cli/               # 外挂：命令行 demo
 │   └── ext-server/            # 外挂：HTTP 聊天服务器
+│       └── src/static/        # 前端静态文件
+│           ├── index.html     # 控制台 HTML 骨架
+│           ├── style.css      # 控制台样式
+│           ├── app.js         # 控制台逻辑
+│           ├── field.html     # 3D 场可视化 HTML 骨架
+│           ├── field.css      # 场可视化样式
+│           └── field.js       # 场可视化逻辑（ES module）
 ├── docs/
 │   ├── design.md
 │   └── superpowers/plans/
@@ -68,6 +75,14 @@ field-memory/
 - **一文件一职责** — 不跨模块泄漏职责。
 - **`engine.rs` 只做编排** — 算法改动在 `physics.rs` / `cycle.rs` / `recall.rs`。
 
+### 前端规约
+
+- **HTML/CSS/JS 三文件分离** — 不写单体 HTML。HTML 只保留骨架，样式在 `.css`，逻辑在 `.js`。
+- **侧栏面板可折叠** — 所有侧栏/面板必须有折叠/展开机制，状态用 `sessionStorage` 持久化。
+- **折叠按钮始终可见** — 折叠后用户必须能找到展开入口，不能把按钮藏在折叠区域内。
+- **field.js 是 ES module** — 用 `importmap` + `<script type="module" src="field.js">`，不能回退为内联 script。
+- **`computeCanvasSize()` 感知面板状态** — 面板折叠时宽度为 0，canvas 自动扩展。
+
 ## 测试规约
 
 - **内联 `#[cfg(test)] mod tests`** — 单元测试和实现写在一起。
@@ -81,4 +96,6 @@ field-memory/
 3. **`sled::Error::Unsupported` 不接受字符串参数**。改用 `MissingData(&'static str)`。
 4. **`Vec.remove()` 后不能复用之前绑定的 `n`**。移除后 `return` 不是 `break`。
 5. **`DummyEmbedProvider` 基于哈希，不是语义**。
-
+6. **单体 HTML 是维护灾难** — 1000+ 行 HTML 让修改定位极其困难，必须拆为 HTML + CSS + JS。
+7. **折叠面板的 toggle 按钮不能放在面板内部** — `overflow:hidden` + `width:0` 会把按钮也隐藏掉，用户无法展开回来。按钮应放在容器中 absolute 定位，或用 JS 动态计算位置。
+8. **JS state 与 HTML toggle class 必须一致** — `state.showLabels = false` 但 HTML 写 `class="toggle on"` 是已有 bug，拆分时必须对齐。
