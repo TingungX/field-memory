@@ -86,4 +86,3 @@ mod tests {
         assert_eq!(revived.density, loser.density);
     }
 }
-
