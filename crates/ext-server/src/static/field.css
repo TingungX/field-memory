@@ -75,6 +75,31 @@
 
     /* ── Layout columns ─────────────────────────────── */
     .app { position: fixed; top: 52px; left: 0; right: 0; bottom: 36px; display: flex; }
+
+    /* ── Rail ── */
+    #rail {
+      width: 44px; flex-shrink: 0;
+      background: var(--surface);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      align-items: center; padding: 10px 0; gap: 4px;
+      z-index: 8;
+    }
+    .rail-btn {
+      width: 34px; height: 34px; border: none; border-radius: 6px;
+      background: transparent; color: var(--text-muted);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, color 0.15s; position: relative;
+    }
+    .rail-btn:hover { background: rgba(126, 162, 214, 0.08); color: var(--text); }
+    .rail-btn.active { background: rgba(126, 162, 214, 0.12); color: var(--accent); }
+    .rail-btn.active::after {
+      content: ''; position: absolute; left: -5px; top: 50%;
+      transform: translateY(-50%); width: 3px; height: 16px;
+      border-radius: 2px; background: var(--accent);
+    }
+
     .panel-left {
       width: 232px; flex-shrink: 0;
       background: var(--surface);
@@ -303,7 +328,7 @@
 
     /* ── Collapsible panels ─────────────────────────── */
     .collapsible {
-      transition: width 0.25s ease, padding 0.25s ease, opacity 0.2s ease;
+      transition: width 0.25s ease, padding 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
       overflow: hidden;
       position: relative;
     }
@@ -311,27 +336,8 @@
       width: 0 !important;
       padding: 0 !important;
       border: none !important;
+      margin: 0 !important;
       opacity: 0;
-      pointer-events: none;
+      overflow: hidden;
     }
-    .field-panel-toggle {
-      position: absolute;
-      top: 50%;
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: var(--surface-2);
-      backdrop-filter: blur(8px);
-      color: var(--text-muted);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      z-index: 5;
-      transform: translateY(-50%);
-      transition: background 0.12s, color 0.12s;
-    }
-    .field-panel-toggle:hover { background: rgba(126, 162, 214, 0.12); color: var(--text); }
 

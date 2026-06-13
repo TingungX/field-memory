@@ -11,9 +11,9 @@ var anchors = [];
 
 // ── Panel collapse state (persisted in sessionStorage) ──
 var panelStates = {
-  sessionSidebar: sessionStorage.getItem('panel-sessionSidebar') !== 'collapsed',
-  panelCore: sessionStorage.getItem('panel-panelCore') !== 'collapsed',
-  panelMem: sessionStorage.getItem('panel-panelMem') !== 'collapsed',
+  'session-sidebar': sessionStorage.getItem('panel-session-sidebar') !== 'collapsed',
+  'panel-core': sessionStorage.getItem('panel-panel-core') !== 'collapsed',
+  'panel-mem': sessionStorage.getItem('panel-panel-mem') !== 'collapsed',
 };
 
 // ── Session management ──
@@ -116,9 +116,9 @@ function updateSessionTitle(s) {
   }
 }
 
-// ── Panel collapse/expand ──
-function initPanelToggles() {
-  // Apply initial states
+// ── Rail panel toggle ──
+function initRailToggles() {
+  // Apply initial collapsed states
   Object.keys(panelStates).forEach(function(id) {
     var el = document.getElementById(id);
     if (!el) return;
@@ -127,50 +127,24 @@ function initPanelToggles() {
     }
   });
 
-  // Position & bind toggle buttons
-  document.querySelectorAll('.panel-toggle').forEach(function(btn) {
+  // Bind rail buttons
+  document.querySelectorAll('#rail .rail-btn').forEach(function(btn) {
     var panelId = btn.getAttribute('data-panel');
     var panel = document.getElementById(panelId);
     if (!panel) return;
 
-    function positionBtn() {
-      var dir = btn.getAttribute('data-dir');
-      var rect = panel.getBoundingClientRect();
-      var colRect = document.getElementById('columns').getBoundingClientRect();
-      var toggleW = 28;
-      if (dir === 'left') {
-        // Button sits on the right edge of the panel
-        btn.style.left = (rect.right - colRect.left - toggleW / 2) + 'px';
-      } else {
-        // Button sits on the left edge of the panel
-        btn.style.left = (rect.left - colRect.left - toggleW / 2) + 'px';
-      }
+    // Set initial active state
+    if (panelStates[panelId]) {
+      btn.classList.add('active');
     }
 
     btn.addEventListener('click', function() {
       var isCollapsed = panel.classList.toggle('collapsed');
       panelStates[panelId] = !isCollapsed;
       sessionStorage.setItem('panel-' + panelId, isCollapsed ? 'collapsed' : 'expanded');
-      updateToggleIcon(btn, isCollapsed);
-      // Reposition after transition
-      setTimeout(positionBtn, 260);
+      btn.classList.toggle('active', !isCollapsed);
     });
-
-    updateToggleIcon(btn, !panelStates[panelId]);
-    positionBtn();
-
-    // Reposition on window resize
-    window.addEventListener('resize', positionBtn);
   });
-}
-
-function updateToggleIcon(btn, isCollapsed) {
-  var dir = btn.getAttribute('data-dir');
-  if (dir === 'left') {
-    btn.textContent = isCollapsed ? '›' : '‹';
-  } else {
-    btn.textContent = isCollapsed ? '‹' : '›';
-  }
 }
 
 // ── Chat input & send ──
@@ -922,7 +896,7 @@ document.addEventListener('DOMContentLoaded', function() {
   input.addEventListener('keydown', handleKey);
   input.addEventListener('input', onInputChange);
 
-  initPanelToggles();
+  initRailToggles();
   createSession();
   loadLibraryList();
   startPolling();

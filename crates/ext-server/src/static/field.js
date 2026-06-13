@@ -37,10 +37,11 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 function computeCanvasSize() {
   const leftPanel = document.getElementById('panel-left-field');
   const rightPanel = document.getElementById('panel-right-field');
+  const railW = 44; // rail is always visible
   const leftW = leftPanel && !leftPanel.classList.contains('collapsed') ? 232 : 0;
   const rightW = rightPanel && !rightPanel.classList.contains('collapsed') ? 304 : 0;
   return {
-    w: Math.max(100, window.innerWidth - leftW - rightW),
+    w: Math.max(100, window.innerWidth - railW - leftW - rightW),
     h: Math.max(100, window.innerHeight - 52 - 36),
   };
 }
@@ -764,7 +765,7 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, true);
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); });
 resize();
 
 // ── Animation loop ────────────────────────────────
@@ -810,33 +811,39 @@ window.addEventListener('error', (e) => {
   if (body) body.innerHTML = `<div class="detail-empty"><div class="ico"></div><div class="msg" style="color:#ff7a5c">运行时错误<br><code style="font-size:10px">${escapeHtml(e.message)}</code></div></div>`;
 });
 
-// ── Panel collapse/expand ─────────────────────────
+// ── Rail panel toggle ──────────────────────────────
 function initPanelToggles() {
   const panelConfigs = [
     { id: 'panel-left-field', storageKey: 'field-panelLeft', dir: 'left' },
     { id: 'panel-right-field', storageKey: 'field-panelRight', dir: 'right' },
   ];
+
+  // Apply initial collapsed states
   panelConfigs.forEach(cfg => {
     const panel = document.getElementById(cfg.id);
     if (!panel) return;
     const isOpen = sessionStorage.getItem(cfg.storageKey) !== 'collapsed';
     if (!isOpen) panel.classList.add('collapsed');
-    const btn = panel.querySelector('.field-panel-toggle');
-    if (btn) {
-      updateFieldToggleIcon(btn, !isOpen, cfg.dir);
-      btn.addEventListener('click', () => {
-        const nowCollapsed = panel.classList.toggle('collapsed');
-        sessionStorage.setItem(cfg.storageKey, nowCollapsed ? 'collapsed' : 'expanded');
-        updateFieldToggleIcon(btn, nowCollapsed, cfg.dir);
-        // Recompute canvas size after panel toggle
-        setTimeout(resize, 280);
-      });
-    }
   });
-}
 
-function updateFieldToggleIcon(btn, isCollapsed, dir) {
-  btn.textContent = dir === 'left' ? (isCollapsed ? '›' : '‹') : (isCollapsed ? '‹' : '›');
+  // Bind rail buttons
+  document.querySelectorAll('#rail .rail-btn').forEach(btn => {
+    const panelId = btn.getAttribute('data-panel');
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+
+    const storageKey = panelConfigs.find(c => c.id === panelId)?.storageKey;
+    const isOpen = !panel.classList.contains('collapsed');
+    if (isOpen) btn.classList.add('active');
+
+    btn.addEventListener('click', () => {
+      const nowCollapsed = panel.classList.toggle('collapsed');
+      if (storageKey) sessionStorage.setItem(storageKey, nowCollapsed ? 'collapsed' : 'expanded');
+      btn.classList.toggle('active', !nowCollapsed);
+      // Recompute canvas size after panel toggle
+      setTimeout(resize, 280);
+    });
+  });
 }
 
 // Init panel toggles on load

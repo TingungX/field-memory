@@ -4,8 +4,9 @@
   --user-bubble: #e8edf4; --border: #e0ddd8; --font: -apple-system, system-ui, sans-serif;
   --accent: #4a6fa5; --tag-bg: #eef2f7; --panel-bg: #fafaf8;
   --col-left: 260px; --col-right: 320px;
-  --toggle-size: 28px;
+  --rail-width: 44px;
 }
+
 body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; overflow:hidden; display:flex; flex-direction:column; }
 
 /* ── header ── */
@@ -17,57 +18,99 @@ header .hdr-btn { font-size:11px; padding:4px 10px; border:1px solid var(--borde
 header .hdr-btn:hover { background:var(--bg); }
 header .hdr-btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
 
-/* ── three-column layout ── */
-#columns { flex:1; display:flex; overflow:hidden; min-height:0; }
+/* ── layout ── */
+#columns { flex:1; display:flex; overflow:hidden; min-height:0; position:relative; }
 
-/* ── collapsible panels ── */
-#columns { position: relative; }
-
-.collapsible {
-  transition: width 0.25s ease, padding 0.25s ease, opacity 0.2s ease;
-  overflow: hidden;
-  position: relative;
-}
-.collapsible.collapsed {
-  width: 0 !important;
-  padding: 0 !important;
-  border: none !important;
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* toggle button — lives inside #columns (outside collapsible) so it stays visible when collapsed */
-.panel-toggle {
-  position: absolute;
-  top: 50%;
-  width: var(--toggle-size);
-  height: var(--toggle-size);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+/* ── rail ── */
+#rail {
+  width: var(--rail-width);
+  flex-shrink: 0;
   background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 4px;
+  z-index: 8;
+}
+
+.rail-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  z-index: 5;
-  transform: translateY(-50%);
-  transition: background 0.12s, color 0.12s, left 0.25s ease;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  transition: background 0.15s, color 0.15s;
+  position: relative;
 }
-.panel-toggle:hover { background:var(--bg); color:var(--text); }
 
-/* left panel */
-#panel-core { width:var(--col-left); flex-shrink:0; overflow-y:auto; background:var(--panel-bg); border-right:1px solid var(--border); padding:12px; font-size:11px; }
+.rail-btn:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.rail-btn.active {
+  background: var(--tag-bg);
+  color: var(--accent);
+}
+
+.rail-btn.active::after {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* ── collapsible panels ── */
+.collapsible {
+  transition: width 0.25s ease, padding 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.collapsible.collapsed {
+  width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.side-left {
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+.side-right {
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+
+/* left panels */
+#panel-core { width:var(--col-left); overflow-y:auto; padding:12px; font-size:11px; }
 
 /* right panel */
-#panel-mem { width:var(--col-right); flex-shrink:0; overflow-y:auto; background:var(--panel-bg); border-left:1px solid var(--border); padding:12px; font-size:11px; }
+#panel-mem { width:var(--col-right); overflow-y:auto; padding:12px; font-size:11px; }
 
 /* session sidebar */
 #session-sidebar {
-  width: 200px; flex-shrink:0; overflow-y:auto; background:var(--panel-bg);
-  border-right:1px solid var(--border); display:flex; flex-direction:column;
+  width: 200px; overflow-y:auto;
+  display:flex; flex-direction:column;
 }
 
 /* panel content */
@@ -193,10 +236,11 @@ header .hdr-btn.primary { background:var(--accent); color:#fff; border-color:var
 /* ── responsive ── */
 @media (max-width: 1000px) {
   #session-sidebar { width:160px; }
-  #panel-core { display:none; }
+  #panel-core { width:220px; }
   #panel-mem { width:260px; }
 }
 @media (max-width: 700px) {
   #session-sidebar { display:none; }
   #panel-mem { display:none; }
 }
+
