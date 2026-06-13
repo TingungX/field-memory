@@ -41,12 +41,6 @@ MEMORY/
 - **测试命名**：`test_<功能或行为>_<预期结果>`。
 - **依赖 `DummyEmbedProvider` 的测试天然不稳定** — 标记 `#[ignore]` 并写注释，不要"修正"数学来曲线救国。接入真实 `EmbedProvider` 才能确定性地通过。
 
-## 输出规约
-
-- 先说做了什么，再解释为什么。
-- 列出修改文件。
-- 非平凡改动同时列出 plan / public API / 持久化格式变更。
-
 ## 调试 / 修复规约
 
 - **先找根因再改代码**。不要用 `unwrap_or_default` 吞 panic，不要注释代码路径。
@@ -64,11 +58,4 @@ MEMORY/
 5. **`Vec.remove()` 后不能复用之前绑定的 `n`**。索引越界。移除后立即 `return` 而不是 `break`。
 6. **`DummyEmbedProvider` 基于哈希，不是语义**。相关中文文本可能产出正交向量。断言密度增长"同一主题提到多次→密度更高"需要真实 `EmbedProvider`。
 7. **`cos_sim(正交方向) = 0 → impact = 0 → effective_direction = 事件原方向**。测试"锚点拉动事件方向"的用例如果输入正交方向，数学上不可满足。
-
-## 有疑问时
-
-1. 先读 `docs/design.md` 理解 why，再动 what。
-2. 读 `docs/superpowers/plans/` 中最新的计划文件获取 task 上下文。
-3. 至少读 3 个 `crates/dse-core/src/` 中的同层文件理解风格。
-4. 如果改动影响 public API 或持久化格式，在同一个 commit 中更新 `docs/design.md`。
 
