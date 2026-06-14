@@ -3,9 +3,11 @@ mod llm;
 mod memory_routes;
 mod sessions;
 mod tools;
+mod ollama_embed;
 
 use axum::Router;
 use field_mem_core::{DseEngine, DseCoreParams};
+use field_mem_core::embed::EmbedProvider;
 use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -21,37 +23,65 @@ pub struct AppState {
     /// Loaded once at startup; every mutation goes through `sessions::mutate()` so
     /// each change is atomically persisted before returning.
     pub sessions: Arc<Mutex<sessions::SessionsData>>,
+    /// Embedding provider configuration — used when creating new engines
+    /// (e.g. library_create) so the new engine uses the same embed model.
+    pub embed_config: EmbedConfig,
+}
+
+#[derive(Clone)]
+pub struct EmbedConfig {
+    pub url: String,
+    pub model: String,
+    pub dim: usize,
+}
+
+impl EmbedConfig {
+    pub fn new_boxed(&self) -> Box<dyn EmbedProvider> {
+        Box::new(ollama_embed::OllamaEmbedProvider::new(
+            &self.url, &self.model, self.dim,
+        ))
+    }
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let embed_url = std::env::var("EMBED_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+    let embed_model = std::env::var("EMBED_MODEL")
+        .unwrap_or_else(|_| "bge-m3".into());
+    let embed_dim: usize = std::env::var("EMBED_DIM")
+        .unwrap_or_else(|_| "1024".into())
+        .parse()
+        .unwrap_or(1024);
+
+    let embed_config = EmbedConfig {
+        url: embed_url.clone(),
+        model: embed_model.clone(),
+        dim: embed_dim,
+    };
+
     let params = DseCoreParams {
-        vector_dim: 32,
+        vector_dim: embed_dim,
         event_window_secs: 86400,
         ..Default::default()
     };
 
-let mut engine = DseEngine::new(params);
-
-    engine.init(&[
-        ("代码质量和长期语义一致性", 12),
-        ("偏好简洁直接的方案", 10),
-        ("对重复犯错敏感", 8),
-    ]);
+    let engine = DseEngine::with_embed(params, embed_config.new_boxed());
 
     let state = Arc::new(AppState {
         engine: Arc::new(Mutex::new(engine)),
         libraries: Arc::new(Mutex::new(std::collections::HashMap::new())),
         active_library: Arc::new(Mutex::new("default".to_string())),
         sessions: sessions::shared(),
+        embed_config: embed_config,
     });
 
     // Register the default library so it appears in the library list
     {
         let mut libs = state.libraries.lock().unwrap();
-        libs.insert("default".to_string(), (3, 0)); // 3 init anchors, 0 events
+        libs.insert("default".to_string(), (0, 0)); // fresh engine, no anchors yet
     }
 
     let app = Router::new()

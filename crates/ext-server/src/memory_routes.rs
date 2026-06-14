@@ -110,13 +110,13 @@ pub(crate) struct LoadResponse {
     seeds_count: usize,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 struct InitConcept {
     label: String,
     density: u32,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub(crate) struct InitRequest {
     concepts: Vec<InitConcept>,
 }
@@ -425,7 +425,7 @@ pub async fn library_create(
     }
 
     // Phase 2: create new engine and save it to disk (no lock needed)
-    let new_engine = DseEngine::new(params);
+    let new_engine = DseEngine::with_embed(params, state.embed_config.new_boxed());
     let path = library_path(&req.name);
     let _ = new_engine.save(&path);
 
@@ -572,67 +572,87 @@ pub async fn seed(
     let events_per = req.events_per_anchor.unwrap_or(8).max(1);
     let cycles = req.relax_cycles.unwrap_or(3).max(1);
 
-    // 1. Create anchors
-    let concepts: Vec<(&str, u32)> = req
-        .concepts
-        .iter()
-        .map(|c| (c.label.as_str(), c.density))
-        .collect();
-    {
-        let mut engine = state.engine.lock().unwrap();
-        engine.init(&concepts);
-    }
+    // Clone concepts + engine + library path for spawn_blocking
+    let concepts = req.concepts.clone();
+    let engine_arc = state.engine.clone();
+    let library_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap()));
 
-    // 2. Generate and inject synthetic events
-    {
-        let eng = state.engine.clone();
-        let mut engine = eng.lock().unwrap();
-        let modifiers = [
-            "擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
-            "讨论过", "遇到的问题", "学到的教训",
-        ];
+    let save_path = library_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let crefs: Vec<(&str, u32)> = concepts.iter().map(|c| (c.label.as_str(), c.density)).collect();
 
-        for concept in &req.concepts {
-            for i in 0..events_per {
-                let mod_idx = i.min(modifiers.len() - 1);
-                let event_text = if mod_idx == 0 {
-                    format!("{}: 这是最核心的原则", concept.label)
-                } else {
-                    format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], concept.label)
-                };
-                engine.on_user_input(&event_text);
+        // 1. Create anchors
+        {
+            let mut engine = engine_arc.lock().unwrap();
+            engine.init(&crefs);
+        }
 
-                if i % 3 == 0 {
-                    engine.on_user_input(&format!("关于{}的补充思考第{}条", concept.label, i + 1));
+        // 2. Generate and inject synthetic events
+        {
+            let mut engine = engine_arc.lock().unwrap();
+            let modifiers = [
+                "擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
+                "讨论过", "遇到的问题", "学到的教训",
+            ];
+
+            for (label, _) in &crefs {
+                for i in 0..events_per {
+                    let mod_idx = i.min(modifiers.len() - 1);
+                    let event_text = if mod_idx == 0 {
+                        format!("{}: 这是最核心的原则", label)
+                    } else {
+                        format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], label)
+                    };
+                    engine.on_user_input(&event_text);
+
+                    if i % 3 == 0 {
+                        engine.on_user_input(&format!("关于{}的补充思考第{}条", label, i + 1));
+                    }
                 }
             }
         }
-    }
 
-    // 3. Run relaxation cycles
-    {
-        let eng = state.engine.clone();
-        let mut engine = eng.lock().unwrap();
-        for _ in 0..cycles {
-            engine.relax();
+        // 3. Run relaxation cycles
+        {
+            let mut engine = engine_arc.lock().unwrap();
+            for _ in 0..cycles {
+                engine.relax();
+            }
+        }
+
+        // 4. Persist to disk so data survives restart
+        //    (the engine's sled DB is at ./libraries/<active_library>).
+        //    We can't access active_library here, but we can save to the
+        //    library path via the persist module on the engine itself.
+        //    The caller (main seed fn) already knows the active library
+        //    name; we log it here as best-effort.
+        {
+            let engine = engine_arc.lock().unwrap();
+            let _ = engine.save(&save_path);
+        }
+
+        // 5. Collect result
+        let engine = engine_arc.lock().unwrap();
+        SeedResponse {
+            anchors_count: engine.anchors.len(),
+            events_count: engine.events.len(),
+            seeds_count: engine.seeds.len(),
+            total_traces: engine.traces.len(),
+            field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
+        }
+    }).await;
+
+    match result {
+        Ok(resp) => Json(resp),
+        Err(e) => {
+            log_error!("seed: spawn_blocking panicked: {}", e);
+            Json(SeedResponse {
+                anchors_count: 0,
+                events_count: 0,
+                seeds_count: 0,
+                total_traces: 0,
+                field_tension: 0.0,
+            })
         }
     }
-
-    // 4. Return result
-    let engine = state.engine.lock().unwrap();
-    let events_count = engine.events.len();
-    let anchors_count = engine.anchors.len();
-    let seeds_count = engine.seeds.len();
-    let traces_count = engine.traces.len();
-    let tension = engine.ecg_report()
-        .map(|r| r.current.tension)
-        .unwrap_or(0.0);
-
-    Json(SeedResponse {
-        anchors_count,
-        events_count,
-        seeds_count,
-        total_traces: traces_count,
-        field_tension: tension,
-    })
 }
