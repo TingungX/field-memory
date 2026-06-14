@@ -100,7 +100,7 @@ async fn handle_chat(
     let last_user_text_ref = if last_user_text.is_empty() { None } else { Some(last_user_text.as_str()) };
 
     let (memory_context, assoc_json, recall_json) = if let Some(query) = last_user_text_ref {
-        let engine = state.engine.lock().unwrap();
+        let engine = state.engine.lock().unwrap_or_else(|e| e.into_inner());
         let recall = engine.recall(query, 5);
         let assoc = engine.associate(query);
 
@@ -234,13 +234,26 @@ let (final_messages, tool_was_invoked) = if should_try_tools {
 // 5. Stream the final LLM response
     let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages, req_api_key, req_reasoning_effort).await;
 
-    // 6. Spawn async memory write (skip system/seed prompts)
+    // 6. Background memory write — use spawn_blocking to avoid blocking
+    //    the tokio worker (on_user_input calls ureq which is blocking HTTP).
+    //    The JoinHandle is deliberately dropped (fire-and-forget) so a
+    //    panic inside the task doesn't poison the Mutex.
+    //    We use std::panic::catch_unwind around the lock to ensure that
+    //    even if the Mutex is already poisoned, we don't propagate the panic.
     if let Some(query) = last_user_text_ref {
         let is_meta_prompt = query.starts_with("【记忆构建模式】");
         if !is_meta_prompt {
             let engine = state.engine.clone();
             let q = query.to_string();
-            tokio::spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut eng = engine.lock().unwrap_or_else(|e| e.into_inner());
+                    eng.on_user_input(&q);
+                    eng.relax();
+                }));
+                if let Err(e) = result {
+                    eprintln!("[memory_write] task panicked: {:?}", e);
+                }
                 let mut eng = engine.lock().unwrap();
                 eng.on_user_input(&q);
                 eng.relax();
