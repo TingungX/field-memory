@@ -14,8 +14,8 @@ pub struct StoredMessage {
     pub content: String,
     #[serde(default)]
     pub time: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memoryCtx: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "memoryCtx")]
+    pub memory_ctx: Option<serde_json::Value>,
     /// Reasoning trace text from the model (if any). Always optional so old
     /// session files lacking the field still deserialize — JSON ignores
     /// missing fields when `#[serde(default)]` is set.
@@ -23,13 +23,13 @@ pub struct StoredMessage {
     pub reasoning: Option<String>,
     /// Accumulated tool calls during streaming (if any). Mirrors OpenAI's
     /// shape: array of {id, type, function: {name, arguments}}.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub toolCalls: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "toolCalls")]
+    pub tool_calls: Option<serde_json::Value>,
     /// Thinking chain: ordered sequence of reasoning/tool_call steps.
     /// Stored as an array of {type, content} where type ∈ "reasoning" | "tool_call".
     /// Optional so old session files still deserialize.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thinkingChain: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "thinkingChain")]
+    pub thinking_chain: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,28 +127,28 @@ pub struct AppendMessageReq {
     pub content: String,
     #[serde(default)]
     pub time: Option<String>,
-    #[serde(default)]
-    pub memoryCtx: Option<serde_json::Value>,
+    #[serde(default, rename = "memoryCtx")]
+    pub memory_ctx: Option<serde_json::Value>,
     #[serde(default)]
     pub reasoning: Option<String>,
-    #[serde(default)]
-    pub toolCalls: Option<serde_json::Value>,
-    #[serde(default)]
-    pub thinkingChain: Option<serde_json::Value>,
+    #[serde(default, rename = "toolCalls")]
+    pub tool_calls: Option<serde_json::Value>,
+    #[serde(default, rename = "thinkingChain")]
+    pub thinking_chain: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateMessageReq {
     #[serde(default)]
     pub content: Option<String>,
-    #[serde(default)]
-    pub memoryCtx: Option<serde_json::Value>,
+    #[serde(default, rename = "memoryCtx")]
+    pub memory_ctx: Option<serde_json::Value>,
     #[serde(default)]
     pub reasoning: Option<String>,
-    #[serde(default)]
-    pub toolCalls: Option<serde_json::Value>,
-    #[serde(default)]
-    pub thinkingChain: Option<serde_json::Value>,
+    #[serde(default, rename = "toolCalls")]
+    pub tool_calls: Option<serde_json::Value>,
+    #[serde(default, rename = "thinkingChain")]
+    pub thinking_chain: Option<serde_json::Value>,
 }
 
 // ─── Endpoints ───
@@ -256,10 +256,10 @@ let msg = StoredMessage {
             role: req.role,
             content: req.content,
             time,
-            memoryCtx: req.memoryCtx,
+            memory_ctx: req.memory_ctx,
             reasoning: req.reasoning,
-            toolCalls: req.toolCalls,
-            thinkingChain: req.thinkingChain,
+            tool_calls: req.tool_calls,
+            thinking_chain: req.thinking_chain,
         };
         s.messages.push(msg);
         Ok(s.messages.len() - 1)
@@ -287,17 +287,17 @@ pub async fn update_message(
 if let Some(c) = req.content {
             m.content = c;
         }
-        if req.memoryCtx.is_some() {
-            m.memoryCtx = req.memoryCtx;
+        if req.memory_ctx.is_some() {
+            m.memory_ctx = req.memory_ctx;
         }
         if req.reasoning.is_some() {
             m.reasoning = req.reasoning;
         }
-        if req.toolCalls.is_some() {
-            m.toolCalls = req.toolCalls;
+        if req.tool_calls.is_some() {
+            m.tool_calls = req.tool_calls;
         }
-        if req.thinkingChain.is_some() {
-            m.thinkingChain = req.thinkingChain;
+        if req.thinking_chain.is_some() {
+            m.thinking_chain = req.thinking_chain;
         }
         Ok(())
     });

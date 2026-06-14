@@ -27,6 +27,7 @@ pub struct Message {
 pub struct OpenAIChatRequest {
     pub messages: Vec<Message>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub stream: bool,
     pub model: Option<String>,
     /// Optional reasoning effort: "low" | "medium" | "high" | "xhigh" (or any
@@ -40,6 +41,7 @@ pub struct OpenAIChatRequest {
 pub struct AnthropicMessagesRequest {
     pub messages: Vec<Message>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub stream: bool,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
