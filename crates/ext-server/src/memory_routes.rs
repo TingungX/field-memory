@@ -170,112 +170,119 @@ pub async fn ping(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value
 
 /// GET /api/memory/status — full engine deep status for both panels
 pub async fn status(State(state): State<Arc<AppState>>) -> Json<MemoryStatus> {
-    let engine = state.engine.lock().unwrap();
+    // Hold the engine lock only long enough to clone data out.
+    // The 1.5s polling cycle means we must release the lock ASAP so that
+    // library_create / library_load / other mutations can acquire it.
+    let (anchors, anchors_count, events_count, recent_events, traces_count,
+         seeds_count, seeds, ecg, ecg_snapshots, ecg_history,
+         vector_dim, event_window_secs, damping_base, stiffness_base,
+         convergence_threshold, cycle_window_secs, impact_trace_threshold,
+         recent_activity) = {
+        let engine = state.engine.lock().unwrap();
 
-    // Anchors
-    let anchors: Vec<AnchorBrief> = engine
-        .anchors
-        .iter()
-        .map(|a| {
-            // First 2 components of direction as 2D projection for visualization
-            let direction_xy = [
-                a.direction.first().copied().unwrap_or(0.0),
-                a.direction.get(1).copied().unwrap_or(0.0),
-            ];
-            AnchorBrief {
-                id: format!("a{}", a.id.0),
-                label: a.label.clone(),
-                density: a.density,
-                stiffness: a.stiffness,
-                damping: a.damping,
-                direction_xy,
-                direction_n: a.direction.clone(),
+        let anchors: Vec<AnchorBrief> = engine
+            .anchors
+            .iter()
+            .map(|a| {
+                let direction_xy = [
+                    a.direction.first().copied().unwrap_or(0.0),
+                    a.direction.get(1).copied().unwrap_or(0.0),
+                ];
+                AnchorBrief {
+                    id: format!("a{}", a.id.0),
+                    label: a.label.clone(),
+                    density: a.density,
+                    stiffness: a.stiffness,
+                    damping: a.damping,
+                    direction_xy,
+                    direction_n: a.direction.clone(),
+                }
+            })
+            .collect();
+        let anchors_count = engine.anchors.len();
+
+        let events_count = engine.events.len();
+        let recent_events: Vec<EventBrief> = engine
+            .events
+            .iter()
+            .rev()
+            .take(10)
+            .map(|e| EventBrief {
+                text: e.text.clone(),
+                timestamp: e.timestamp.to_rfc3339(),
+            })
+            .collect();
+
+        let traces_count = engine.traces.len();
+
+        let seeds_count = engine.seeds.len();
+        let seeds: Vec<SeedBrief> = engine
+            .seeds
+            .iter()
+            .map(|s| SeedBrief {
+                orthogonal_direction_0: s.orthogonal_direction.first().copied().unwrap_or(0.0),
+                defeated_by: s.defeated_by.0,
+                pressure_accumulated: s.pressure_accumulated,
+            })
+            .collect();
+
+        let ecg = engine.ecg_report().map(|r| {
+            let mag = r
+                .current
+                .anisotropies
+                .first()
+                .map(|a| a.magnitude)
+                .unwrap_or(0.0);
+            EcgBrief {
+                field_tension: r.current.tension,
+                convergence_rate: r.current.convergence_rate,
+                anisotropy_magnitude: mag,
             }
-        })
-        .collect();
-    let anchors_count = engine.anchors.len();
+        });
+        let ecg_snapshots = engine.ecg.snapshots.len();
+        let ecg_history: Vec<EcgSnapshotBrief> = engine
+            .ecg
+            .snapshots
+            .iter()
+            .rev()
+            .take(20)
+            .map(|s| EcgSnapshotBrief {
+                tension: s.tension,
+                convergence_rate: s.convergence_rate,
+                anchor_count: s.anchor_count,
+                event_inflow: s.event_inflow,
+                timestamp: s.timestamp.to_rfc3339(),
+            })
+            .collect();
 
-    // Events
-    let events_count = engine.events.len();
-    let recent_events: Vec<EventBrief> = engine
-        .events
-        .iter()
-        .rev()
-        .take(10)
-        .map(|e| EventBrief {
-            text: e.text.clone(),
-            timestamp: e.timestamp.to_rfc3339(),
-        })
-        .collect();
+        let vector_dim = engine.params.vector_dim;
+        let event_window_secs = engine.params.event_window_secs;
+        let damping_base = engine.params.damping_base;
+        let stiffness_base = engine.params.stiffness_base;
+        let convergence_threshold = engine.params.convergence_threshold;
 
-    // Traces
-    let traces_count = engine.traces.len();
+        let cycle_window_secs = engine.cycle.window.num_seconds();
+        let impact_trace_threshold = engine.cycle.impact_trace_threshold;
 
-    // Seeds
-    let seeds_count = engine.seeds.len();
-    let seeds: Vec<SeedBrief> = engine
-        .seeds
-        .iter()
-        .map(|s| SeedBrief {
-            orthogonal_direction_0: s.orthogonal_direction.first().copied().unwrap_or(0.0),
-            defeated_by: s.defeated_by.0,
-            pressure_accumulated: s.pressure_accumulated,
-        })
-        .collect();
+        let recent_activity: Vec<serde_json::Value> = engine
+            .recent_activity
+            .iter()
+            .rev()
+            .take(25)
+            .map(|a| serde_json::json!({
+                "kind": format!("{:?}", a.kind),
+                "detail": a.detail,
+                "timestamp": a.timestamp.to_rfc3339(),
+            }))
+            .collect();
 
-    // ECG
-    let ecg = engine.ecg_report().map(|r| {
-        let mag = r
-            .current
-            .anisotropies
-            .first()
-            .map(|a| a.magnitude)
-            .unwrap_or(0.0);
-        EcgBrief {
-            field_tension: r.current.tension,
-            convergence_rate: r.current.convergence_rate,
-            anisotropy_magnitude: mag,
-        }
-    });
-    let ecg_snapshots = engine.ecg.snapshots.len();
-    let ecg_history: Vec<EcgSnapshotBrief> = engine
-        .ecg
-        .snapshots
-        .iter()
-        .rev()
-        .take(20)
-        .map(|s| EcgSnapshotBrief {
-            tension: s.tension,
-            convergence_rate: s.convergence_rate,
-            anchor_count: s.anchor_count,
-            event_inflow: s.event_inflow,
-            timestamp: s.timestamp.to_rfc3339(),
-        })
-        .collect();
-
-    // Engine params
-    let vector_dim = engine.params.vector_dim;
-    let event_window_secs = engine.params.event_window_secs;
-    let damping_base = engine.params.damping_base;
-    let stiffness_base = engine.params.stiffness_base;
-    let convergence_threshold = engine.params.convergence_threshold;
-
-    // Cycle state
-    let cycle_window_secs = engine.cycle.window.num_seconds();
-    let impact_trace_threshold = engine.cycle.impact_trace_threshold;
-
-    // Recent activity
-    let recent_activity: Vec<serde_json::Value> = engine
-        .recent_activity
-        .iter()
-        .rev()
-        .take(25)
-        .map(|a| serde_json::json!({
-            "kind": format!("{:?}", a.kind),
-            "detail": a.detail,
-            "timestamp": a.timestamp.to_rfc3339(),
-        }))
-        .collect();
+        // Lock released here when this block ends
+        (anchors, anchors_count, events_count, recent_events, traces_count,
+         seeds_count, seeds, ecg, ecg_snapshots, ecg_history,
+         vector_dim, event_window_secs, damping_base, stiffness_base,
+         convergence_threshold, cycle_window_secs, impact_trace_threshold,
+         recent_activity)
+    };
 
     Json(MemoryStatus {
         anchors,
@@ -397,31 +404,32 @@ pub async fn library_create(
         return Json(serde_json::json!({"ok": false, "error": format!("记忆库 '{}' 已存在", req.name)}));
     }
 
-    // Auto-save current engine state before switching (best-effort)
-    {
-        let current = state.active_library.lock().unwrap().clone();
-        let engine = state.engine.lock().unwrap();
-        let path = library_path(&current);
-        let _ = engine.save(&path);
-        let a = engine.anchors.len();
-        let e = engine.events.len();
-        state.libraries.lock().unwrap().insert(current, (a, e));
-    }
-
-    // Reset engine to empty state with same params
+    // Phase 1: under a single engine lock, auto-save current state and
+    // extract params for the new engine.  This avoids acquiring engine lock
+    // multiple times (which causes contention with the 1.5s status poll).
     let params;
+    let current_counts: (usize, usize);
     {
         let engine = state.engine.lock().unwrap();
         params = engine.params.clone();
+        current_counts = (engine.anchors.len(), engine.events.len());
+        // Auto-save current engine state before switching (best-effort)
+        let current = state.active_library.lock().unwrap().clone();
+        let path = library_path(&current);
+        let _ = engine.save(&path);
     }
-    let new_engine = DseEngine::new(params);
-
-    // Save empty engine to target path, then replace in-memory engine
-    let path = library_path(&req.name);
+    // Update library registry outside the engine lock
     {
-        let _ = new_engine.save(&path);
+        let current = state.active_library.lock().unwrap().clone();
+        state.libraries.lock().unwrap().insert(current, current_counts);
     }
 
+    // Phase 2: create new engine and save it to disk (no lock needed)
+    let new_engine = DseEngine::new(params);
+    let path = library_path(&req.name);
+    let _ = new_engine.save(&path);
+
+    // Phase 3: swap in the new engine under a single short lock
     {
         let mut engine = state.engine.lock().unwrap();
         *engine = new_engine;

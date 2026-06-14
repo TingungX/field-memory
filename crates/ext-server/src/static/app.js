@@ -636,6 +636,22 @@ async function resendFromMessage(s, userIdx) {
           renderThinkingChain(assistantDiv, thinkingChain);
           continue;
         }
+        if (data.indexOf('__REASONING__') === 0) {
+          try {
+            var rp = JSON.parse(data.slice('__REASONING__'.length));
+            if (rp && typeof rp.delta === 'string') buildThinkingChain(thinkingChain, rp.delta, null);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
+        if (data.indexOf('__TOOL_CALLS__') === 0) {
+          try {
+            var tc = JSON.parse(data.slice('__TOOL_CALLS__'.length));
+            buildThinkingChain(thinkingChain, null, tc);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
         if (!receivedContent) {
           receivedContent = true;
           assistantDiv.classList.remove('typing');
@@ -649,6 +665,7 @@ async function resendFromMessage(s, userIdx) {
     lastAssistant.content = fullText;
     lastAssistant.memoryCtx = memoryCtx;
     lastAssistant.thinkingChain = thinkingChain.length ? thinkingChain : null;
+    lastAssistant.thinkingChain = thinkingChain.length ? thinkingChain : null;
     // Derive legacy reasoning/toolCalls from chain for server persistence.
     var _lr = '', _ltc = null;
     for (var _ci = 0; _ci < thinkingChain.length; _ci++) {
@@ -661,6 +678,7 @@ async function resendFromMessage(s, userIdx) {
     contentEl.innerHTML = mdToHtml(fullText);
     if (memoryCtx) renderMemoryCtx(assistantDiv, memoryCtx);
     if (memoryCtx && memoryCtx.tool_invoked) fetchStatus();
+    renderThinkingChain(assistantDiv, thinkingChain);
     renderThinkingChain(assistantDiv, thinkingChain);
   } catch (e) {
     assistantDiv.classList.remove('typing');
@@ -1909,6 +1927,7 @@ async function handleSeedCommand(args) {
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var fullText = '', memoryCtx = null, reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '', receivedContent = false;
+    var thinkingChain = [];
     while (true) {
       var result = await reader.read();
       if (result.done) break;
@@ -1952,7 +1971,7 @@ fullText = '错误: ' + e.message;
   apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: fullText, memoryCtx: memoryCtx }),
+    body: JSON.stringify({ content: fullText, memoryCtx: memoryCtx, thinkingChain: thinkingChain.length ? thinkingChain : null }),
   }, 'seed: 更新助手消息');
   isStreaming = false; sendBtn.disabled = false; input.focus();
 }
