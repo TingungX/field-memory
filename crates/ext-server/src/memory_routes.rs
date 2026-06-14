@@ -464,64 +464,44 @@ pub async fn query(
     State(state): State<Arc<AppState>>,
     Json(req): Json<QueryRequest>,
 ) -> Json<QueryResponse> {
-    let q = req.query.clone();
+    let engine = state.engine.lock().unwrap();
+    let q = req.query.as_str();
     let top_k = req.top_k.unwrap_or(5).min(10);
-    let mode = req.mode.clone().unwrap_or_else(|| "both".into());
-    let engine_arc = state.engine.clone();
+    let mode = req.mode.as_deref().unwrap_or("both");
 
-    // embed() is blocking HTTP (ollama) — run in spawn_blocking
-    let result = tokio::task::spawn_blocking(move || {
-        let engine = engine_arc.lock().unwrap();
-
-        let associated_anchors = if mode == "associate" || mode == "both" {
-            let assoc = engine.associate(&q);
-            assoc.iter().take(top_k).map(|(a, imp)| {
-                serde_json::json!({
-                    "label": a.label,
-                    "density": a.density,
-                    "impact": format!("{:.3}", imp),
-                })
-            }).collect()
-        } else {
-            vec![]
-        };
-
-        let recalled_events = if mode == "recall" || mode == "both" {
-            let recall = engine.recall(&q, top_k);
-            recall.events.iter().take(top_k).map(|(text, anchor, _imp)| {
-                serde_json::json!({
-                    "text": text,
-                    "anchor": anchor,
-                })
-            }).collect()
-        } else {
-            vec![]
-        };
-
-        QueryResponse {
-            query: q,
-            mode,
-            anchors_count: associated_anchors.len(),
-            events_count: recalled_events.len(),
-            associated_anchors,
-            recalled_events,
-        }
-    }).await;
-
-    match result {
-        Ok(resp) => Json(resp),
-        Err(e) => {
-            log_error!("query: spawn_blocking panicked: {}", e);
-            Json(QueryResponse {
-                query: req.query,
-                mode: "error".into(),
-                anchors_count: 0,
-                events_count: 0,
-                associated_anchors: vec![],
-                recalled_events: vec![],
+    let associated_anchors = if mode == "associate" || mode == "both" {
+        let assoc = engine.associate(q);
+        assoc.iter().take(top_k).map(|(a, imp)| {
+            serde_json::json!({
+                "label": a.label,
+                "density": a.density,
+                "impact": format!("{:.3}", imp),
             })
-        }
-    }
+        }).collect()
+    } else {
+        vec![]
+    };
+
+    let recalled_events = if mode == "recall" || mode == "both" {
+        let recall = engine.recall(q, top_k);
+        recall.events.iter().take(top_k).map(|(text, anchor, _imp)| {
+            serde_json::json!({
+                "text": text,
+                "anchor": anchor,
+            })
+        }).collect()
+    } else {
+        vec![]
+    };
+
+    Json(QueryResponse {
+        query: req.query,
+        mode: mode.to_string(),
+        anchors_count: associated_anchors.len(),
+        events_count: recalled_events.len(),
+        associated_anchors,
+        recalled_events,
+    })
 }
 
 /// POST /api/memory/save
@@ -584,7 +564,8 @@ pub async fn init(
 /// 1. Create anchors from seed concepts
 /// 2. Generate synthetic events from concept variations
 /// 3. Run multiple relaxation cycles
-/// 4. Return final field state
+/// 4. Persist to disk
+/// 5. Return final field state
 pub async fn seed(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SeedRequest>,
@@ -592,87 +573,66 @@ pub async fn seed(
     let events_per = req.events_per_anchor.unwrap_or(8).max(1);
     let cycles = req.relax_cycles.unwrap_or(3).max(1);
 
-    // Clone concepts + engine + library path for spawn_blocking
-    let concepts = req.concepts.clone();
-    let engine_arc = state.engine.clone();
-    let library_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap()));
+    // 1. Create anchors
+    let concepts: Vec<(&str, u32)> = req
+        .concepts
+        .iter()
+        .map(|c| (c.label.as_str(), c.density))
+        .collect();
+    {
+        let mut engine = state.engine.lock().unwrap();
+        engine.init(&concepts);
+    }
 
-    let save_path = library_path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let crefs: Vec<(&str, u32)> = concepts.iter().map(|c| (c.label.as_str(), c.density)).collect();
+    // 2. Generate and inject synthetic events
+    {
+        let eng = state.engine.clone();
+        let mut engine = eng.lock().unwrap();
+        let modifiers = [
+            "擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
+            "讨论过", "遇到的问题", "学到的教训",
+        ];
 
-        // 1. Create anchors
-        {
-            let mut engine = engine_arc.lock().unwrap();
-            engine.init(&crefs);
-        }
+        for concept in &req.concepts {
+            for i in 0..events_per {
+                let mod_idx = i.min(modifiers.len() - 1);
+                let event_text = if mod_idx == 0 {
+                    format!("{}: 这是最核心的原则", concept.label)
+                } else {
+                    format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], concept.label)
+                };
+                engine.on_user_input(&event_text);
 
-        // 2. Generate and inject synthetic events
-        {
-            let mut engine = engine_arc.lock().unwrap();
-            let modifiers = [
-                "擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
-                "讨论过", "遇到的问题", "学到的教训",
-            ];
-
-            for (label, _) in &crefs {
-                for i in 0..events_per {
-                    let mod_idx = i.min(modifiers.len() - 1);
-                    let event_text = if mod_idx == 0 {
-                        format!("{}: 这是最核心的原则", label)
-                    } else {
-                        format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], label)
-                    };
-                    engine.on_user_input(&event_text);
-
-                    if i % 3 == 0 {
-                        engine.on_user_input(&format!("关于{}的补充思考第{}条", label, i + 1));
-                    }
+                if i % 3 == 0 {
+                    engine.on_user_input(&format!("关于{}的补充思考第{}条", concept.label, i + 1));
                 }
             }
         }
+    }
 
-        // 3. Run relaxation cycles
-        {
-            let mut engine = engine_arc.lock().unwrap();
-            for _ in 0..cycles {
-                engine.relax();
-            }
-        }
-
-        // 4. Persist to disk so data survives restart
-        //    (the engine's sled DB is at ./libraries/<active_library>).
-        //    We can't access active_library here, but we can save to the
-        //    library path via the persist module on the engine itself.
-        //    The caller (main seed fn) already knows the active library
-        //    name; we log it here as best-effort.
-        {
-            let engine = engine_arc.lock().unwrap();
-            let _ = engine.save(&save_path);
-        }
-
-        // 5. Collect result
-        let engine = engine_arc.lock().unwrap();
-        SeedResponse {
-            anchors_count: engine.anchors.len(),
-            events_count: engine.events.len(),
-            seeds_count: engine.seeds.len(),
-            total_traces: engine.traces.len(),
-            field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
-        }
-    }).await;
-
-    match result {
-        Ok(resp) => Json(resp),
-        Err(e) => {
-            log_error!("seed: spawn_blocking panicked: {}", e);
-            Json(SeedResponse {
-                anchors_count: 0,
-                events_count: 0,
-                seeds_count: 0,
-                total_traces: 0,
-                field_tension: 0.0,
-            })
+    // 3. Run relaxation cycles
+    {
+        let eng = state.engine.clone();
+        let mut engine = eng.lock().unwrap();
+        for _ in 0..cycles {
+            engine.relax();
         }
     }
+
+    // 4. Persist to disk
+    {
+        let lib_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap()));
+        let engine = state.engine.lock().unwrap();
+        let _ = engine.save(&lib_path);
+    }
+
+    // 5. Return result
+    let engine = state.engine.lock().unwrap();
+    Json(SeedResponse {
+        anchors_count: engine.anchors.len(),
+        events_count: engine.events.len(),
+        seeds_count: engine.seeds.len(),
+        total_traces: engine.traces.len(),
+        field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
+    })
 }
