@@ -29,6 +29,11 @@ pub struct OpenAIChatRequest {
     #[serde(default)]
     pub stream: bool,
     pub model: Option<String>,
+    /// Optional reasoning effort: "low" | "medium" | "high" | "xhigh" (or any
+    /// provider-specific token). Forwarded to the upstream LLM as-is; if
+    /// absent, the field is omitted from the upstream request entirely so
+    /// models that don't understand it see no change.
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -37,6 +42,7 @@ pub struct AnthropicMessagesRequest {
     #[serde(default)]
     pub stream: bool,
     pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 pub async fn chat_completions(
@@ -44,13 +50,13 @@ pub async fn chat_completions(
     headers: axum::http::HeaderMap,
     Json(req): Json<OpenAIChatRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let model = req.model.as_deref();
+let model = req.model.as_deref();
     let api_key = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string());
-    Sse::new(handle_chat(state, req.messages, model, api_key.as_deref()).await)
+    Sse::new(handle_chat(state, req.messages, model, req.reasoning_effort.as_deref(), api_key.as_deref()).await)
 }
 
 pub async fn messages(
@@ -64,7 +70,7 @@ pub async fn messages(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string());
-    Sse::new(handle_chat(state, req.messages, model, api_key.as_deref()).await)
+    Sse::new(handle_chat(state, req.messages, model, req.reasoning_effort.as_deref(), api_key.as_deref()).await)
 }
 
 // ── Main handler ──
@@ -73,6 +79,7 @@ async fn handle_chat(
     state: Arc<AppState>,
     messages: Vec<Message>,
     req_model: Option<&str>,
+    req_reasoning_effort: Option<&str>,
     req_api_key: Option<&str>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     let backend_url = std::env::var("LLM_BACKEND")
@@ -148,8 +155,8 @@ async fn handle_chat(
     let tool_defs = tools::tool_definitions();
     let should_try_tools = !llm_messages.iter().any(|m| m.role == "tool");
 
-    let (final_messages, tool_was_invoked) = if should_try_tools {
-        match llm::chat_completion(&backend_url, &backend_model, &llm_messages, Some(&tool_defs), req_api_key).await {
+let (final_messages, tool_was_invoked) = if should_try_tools {
+        match llm::chat_completion(&backend_url, &backend_model, &llm_messages, Some(&tool_defs), req_api_key, req_reasoning_effort).await {
             Ok(resp) => {
                 let finish = resp["choices"][0]["finish_reason"].as_str().unwrap_or("");
                 if finish == "tool_calls" {
@@ -224,8 +231,8 @@ async fn handle_chat(
         Ok(Event::default().data(memory_event_payload))
     });
 
-    // 5. Stream the final LLM response
-    let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages, req_api_key).await;
+// 5. Stream the final LLM response
+    let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages, req_api_key, req_reasoning_effort).await;
 
     // 6. Spawn async memory write (skip system/seed prompts)
     if let Some(query) = last_user_text_ref {
