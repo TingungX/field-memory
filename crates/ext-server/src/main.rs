@@ -17,6 +17,10 @@ pub struct AppState {
     pub libraries: Arc<Mutex<std::collections::HashMap<String, (usize, usize)>>>,
     /// Currently active library name
     pub active_library: Arc<Mutex<String>>,
+    /// Server-side source of truth for sessions.
+    /// Loaded once at startup; every mutation goes through `sessions::mutate()` so
+    /// each change is atomically persisted before returning.
+    pub sessions: Arc<Mutex<sessions::SessionsData>>,
 }
 
 #[tokio::main]
@@ -29,7 +33,7 @@ async fn main() {
         ..Default::default()
     };
 
-    let mut engine = DseEngine::new(params);
+let mut engine = DseEngine::new(params);
 
     engine.init(&[
         ("代码质量和长期语义一致性", 12),
@@ -41,6 +45,7 @@ async fn main() {
         engine: Arc::new(Mutex::new(engine)),
         libraries: Arc::new(Mutex::new(std::collections::HashMap::new())),
         active_library: Arc::new(Mutex::new("default".to_string())),
+        sessions: sessions::shared(),
     });
 
     // Register the default library so it appears in the library list
@@ -64,8 +69,13 @@ async fn main() {
         .route("/api/memory/library/load", axum::routing::post(memory_routes::library_load))
         .route("/api/memory/library/create", axum::routing::post(memory_routes::library_create))
         .route("/api/memory/library/delete", axum::routing::post(memory_routes::library_delete))
-        // Sessions persistence
-        .route("/api/sessions", axum::routing::get(sessions::load).post(sessions::save))
+// Sessions persistence — server-side source of truth.
+        // Each mutation atomically saves to disk before returning, so a partial
+        // client request can never lose server state.
+        .route("/api/sessions", axum::routing::get(sessions::list).post(sessions::create))
+.route("/api/sessions/{id}", axum::routing::patch(sessions::patch).delete(sessions::delete))
+        .route("/api/sessions/{id}/messages", axum::routing::post(sessions::append_message))
+.route("/api/sessions/{id}/messages/{idx}", axum::routing::patch(sessions::update_message).delete(sessions::delete_message))
         // Dedicated 3D field visualization page
         .route("/field", axum::routing::get_service(ServeFile::new("crates/ext-server/src/static/field.html")))
         .fallback_service(
