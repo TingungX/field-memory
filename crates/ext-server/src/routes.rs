@@ -90,45 +90,49 @@ async fn handle_chat(
         .unwrap_or("test-model-1")
         .to_string();
 
-    // 1. Extract last user text for memory context
+    // 1. Extract last user text for memory context.
+    //    engine.recall/associate involve blocking HTTP (ollama), so run in spawn_blocking.
     let last_user_text = messages.iter()
         .rev()
         .find(|m| m.role == "user")
         .and_then(|m| m.content.as_deref())
         .unwrap_or("")
         .to_string();
-    let last_user_text_ref = if last_user_text.is_empty() { None } else { Some(last_user_text.as_str()) };
 
-    let (memory_context, assoc_json, recall_json) = if let Some(query) = last_user_text_ref {
-        let engine = state.engine.lock().unwrap();
-        let recall = engine.recall(query, 5);
-        let assoc = engine.associate(query);
-
-        let assoc_json: Vec<serde_json::Value> = assoc.iter().take(5).map(|(a, imp)| {
-            serde_json::json!({"label": a.label, "impact": format!("{:.2}", imp)})
-        }).collect();
-
-        let recall_json: Vec<serde_json::Value> = recall.events.iter().take(5).map(|(text, anchor, _imp)| {
-            serde_json::json!({"text": text, "anchor": anchor})
-        }).collect();
-
-        let mut ctx = String::new();
-        if !assoc.is_empty() {
-            ctx.push_str("[关联概念] ");
-            for (a, imp) in assoc.iter().take(5) {
-                ctx.push_str(&format!("{} (关联度:{:.1}) ", a.label, imp));
-            }
-            ctx.push('\n');
-        }
-        if !recall.events.is_empty() {
-            ctx.push_str("[相关记忆]\n");
-            for (text, anchor, _imp) in recall.events.iter().take(5) {
-                ctx.push_str(&format!("  [{}] {}\n", anchor, text));
-            }
-        }
-        (ctx, assoc_json, recall_json)
-    } else {
+    let (memory_context, assoc_json, recall_json) = if last_user_text.is_empty() {
         (String::new(), vec![], vec![])
+    } else {
+        let q = last_user_text.clone();
+        let engine_arc = state.engine.clone();
+        tokio::task::spawn_blocking(move || {
+            let engine = engine_arc.lock().unwrap();
+            let recall = engine.recall(&q, 5);
+            let assoc = engine.associate(&q);
+
+            let assoc_json: Vec<serde_json::Value> = assoc.iter().take(5).map(|(a, imp)| {
+                serde_json::json!({"label": a.label, "impact": format!("{:.2}", imp)})
+            }).collect();
+
+            let recall_json: Vec<serde_json::Value> = recall.events.iter().take(5).map(|(text, anchor, _imp)| {
+                serde_json::json!({"text": text, "anchor": anchor})
+            }).collect();
+
+            let mut ctx = String::new();
+            if !assoc.is_empty() {
+                ctx.push_str("[关联概念] ");
+                for (a, imp) in assoc.iter().take(5) {
+                    ctx.push_str(&format!("{} (关联度:{:.1}) ", a.label, imp));
+                }
+                ctx.push('\n');
+            }
+            if !recall.events.is_empty() {
+                ctx.push_str("[相关记忆]\n");
+                for (text, anchor, _imp) in recall.events.iter().take(5) {
+                    ctx.push_str(&format!("  [{}] {}\n", anchor, text));
+                }
+            }
+            (ctx, assoc_json, recall_json)
+        }).await.unwrap_or_default()
     };
 
     // 2. Build LLM messages with memory context injected
@@ -234,18 +238,15 @@ let (final_messages, tool_was_invoked) = if should_try_tools {
 // 5. Stream the final LLM response
     let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages, req_api_key, req_reasoning_effort).await;
 
-    // 6. Spawn async memory write (skip system/seed prompts)
-    if let Some(query) = last_user_text_ref {
-        let is_meta_prompt = query.starts_with("【记忆构建模式】");
-        if !is_meta_prompt {
-            let engine = state.engine.clone();
-            let q = query.to_string();
-            tokio::spawn(async move {
-                let mut eng = engine.lock().unwrap();
-                eng.on_user_input(&q);
-                eng.relax();
-            });
-        }
+    // 6. Spawn blocking memory write (on_user_input calls embed, which is blocking HTTP)
+    if !last_user_text.is_empty() && !last_user_text.starts_with("【记忆构建模式】") {
+        let engine = state.engine.clone();
+        let q = last_user_text.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut eng = engine.lock().unwrap();
+            eng.on_user_input(&q);
+            eng.relax();
+        });
     }
 
     Box::pin(memory_event_stream.chain(llm_stream))

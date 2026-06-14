@@ -464,44 +464,64 @@ pub async fn query(
     State(state): State<Arc<AppState>>,
     Json(req): Json<QueryRequest>,
 ) -> Json<QueryResponse> {
-    let engine = state.engine.lock().unwrap();
-    let q = req.query.as_str();
+    let q = req.query.clone();
     let top_k = req.top_k.unwrap_or(5).min(10);
-    let mode = req.mode.as_deref().unwrap_or("both");
+    let mode = req.mode.clone().unwrap_or_else(|| "both".into());
+    let engine_arc = state.engine.clone();
 
-    let associated_anchors = if mode == "associate" || mode == "both" {
-        let assoc = engine.associate(q);
-        assoc.iter().take(top_k).map(|(a, imp)| {
-            serde_json::json!({
-                "label": a.label,
-                "density": a.density,
-                "impact": format!("{:.3}", imp),
+    // embed() is blocking HTTP (ollama) — run in spawn_blocking
+    let result = tokio::task::spawn_blocking(move || {
+        let engine = engine_arc.lock().unwrap();
+
+        let associated_anchors = if mode == "associate" || mode == "both" {
+            let assoc = engine.associate(&q);
+            assoc.iter().take(top_k).map(|(a, imp)| {
+                serde_json::json!({
+                    "label": a.label,
+                    "density": a.density,
+                    "impact": format!("{:.3}", imp),
+                })
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        let recalled_events = if mode == "recall" || mode == "both" {
+            let recall = engine.recall(&q, top_k);
+            recall.events.iter().take(top_k).map(|(text, anchor, _imp)| {
+                serde_json::json!({
+                    "text": text,
+                    "anchor": anchor,
+                })
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        QueryResponse {
+            query: q,
+            mode,
+            anchors_count: associated_anchors.len(),
+            events_count: recalled_events.len(),
+            associated_anchors,
+            recalled_events,
+        }
+    }).await;
+
+    match result {
+        Ok(resp) => Json(resp),
+        Err(e) => {
+            log_error!("query: spawn_blocking panicked: {}", e);
+            Json(QueryResponse {
+                query: req.query,
+                mode: "error".into(),
+                anchors_count: 0,
+                events_count: 0,
+                associated_anchors: vec![],
+                recalled_events: vec![],
             })
-        }).collect()
-    } else {
-        vec![]
-    };
-
-    let recalled_events = if mode == "recall" || mode == "both" {
-        let recall = engine.recall(q, top_k);
-        recall.events.iter().take(top_k).map(|(text, anchor, _imp)| {
-            serde_json::json!({
-                "text": text,
-                "anchor": anchor,
-            })
-        }).collect()
-    } else {
-        vec![]
-    };
-
-    Json(QueryResponse {
-        query: req.query,
-        mode: mode.to_string(),
-        anchors_count: associated_anchors.len(),
-        events_count: recalled_events.len(),
-        associated_anchors,
-        recalled_events,
-    })
+        }
+    }
 }
 
 /// POST /api/memory/save
