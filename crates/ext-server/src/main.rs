@@ -43,6 +43,7 @@ impl EmbedConfig {
     }
 }
 
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -70,19 +71,29 @@ async fn main() {
 
     let engine = DseEngine::with_embed(params, embed_config.new_boxed());
 
+    let lib_registry = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    // Scan ./libraries/ for existing libraries on disk
+    {
+        let mut libs = lib_registry.lock().unwrap();
+        if let Ok(entries) = std::fs::read_dir("./libraries") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') || !entry.path().is_dir() { continue; }
+                libs.insert(name.clone(), (0, 0));
+                eprintln!("[startup] library '{}'", name);
+            }
+        }
+        libs.entry("default".to_string()).or_insert((0, 0));
+    }
+
     let state = Arc::new(AppState {
         engine: Arc::new(Mutex::new(engine)),
-        libraries: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        libraries: lib_registry,
         active_library: Arc::new(Mutex::new("default".to_string())),
         sessions: sessions::shared(),
         embed_config: embed_config,
     });
-
-    // Register the default library so it appears in the library list
-    {
-        let mut libs = state.libraries.lock().unwrap();
-        libs.insert("default".to_string(), (0, 0)); // fresh engine, no anchors yet
-    }
 
     let app = Router::new()
         .route("/v1/chat/completions", axum::routing::post(routes::chat_completions))
@@ -119,7 +130,7 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "5000".into());
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5100".into());
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     println!("server listening on http://{}", addr);

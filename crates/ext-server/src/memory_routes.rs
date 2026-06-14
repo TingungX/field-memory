@@ -504,15 +504,17 @@ pub async fn query(
     })
 }
 
-/// POST /api/memory/save
+/// POST /api/memory/save — persist current engine to the active library
 pub async fn save(State(state): State<Arc<AppState>>) -> Json<SaveResponse> {
+    let lib_name = state.active_library.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let path = format!("./libraries/{}", lib_name);
     let mut engine = state.engine.lock().unwrap();
-    let result = engine.save(Path::new("./memory_state"));
+    let result = engine.save(Path::new(&path));
     engine.log_save();
     match result {
         Ok(_) => Json(SaveResponse { ok: true, error: None }),
         Err(e) => {
-            log_error!("save: failed path=./memory_state error={}", e);
+            log_error!("save: failed path={} error={}", path, e);
             Json(SaveResponse { ok: false, error: Some(format!("保存失败: {e}")) })
         }
     }

@@ -132,10 +132,19 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // ── Panel collapse state (persisted in sessionStorage) ──
+// Desktop: only session-sidebar open by default; mobile: all collapsed.
+// sessionStorage overrides take priority (user explicitly toggled).
+var _isMobile = window.innerWidth <= 768;
+function _panelDefault(id) {
+  var stored = sessionStorage.getItem('panel-' + id);
+  if (stored !== null) return stored !== 'collapsed';
+  if (_isMobile) return false;
+  return id === 'session-sidebar';
+}
 var panelStates = {
-  'session-sidebar': sessionStorage.getItem('panel-session-sidebar') !== 'collapsed',
-  'panel-core': sessionStorage.getItem('panel-panel-core') !== 'collapsed',
-  'panel-mem': sessionStorage.getItem('panel-panel-mem') !== 'collapsed',
+  'session-sidebar': _panelDefault('session-sidebar'),
+  'panel-core': _panelDefault('panel-core'),
+  'panel-mem': _panelDefault('panel-mem'),
 };
 
 // ── Session management ──

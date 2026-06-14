@@ -245,18 +245,18 @@ let (final_messages, tool_was_invoked) = if should_try_tools {
         if !is_meta_prompt {
             let engine = state.engine.clone();
             let q = query.to_string();
+            let save_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap_or_else(|e| e.into_inner())));
             tokio::task::spawn_blocking(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut eng = engine.lock().unwrap_or_else(|e| e.into_inner());
                     eng.on_user_input(&q);
                     eng.relax();
+                    // Auto-persist after every user input + relaxation cycle
+                    let _ = eng.save(&save_path);
                 }));
                 if let Err(e) = result {
                     eprintln!("[memory_write] task panicked: {:?}", e);
                 }
-                let mut eng = engine.lock().unwrap();
-                eng.on_user_input(&q);
-                eng.relax();
             });
         }
     }
