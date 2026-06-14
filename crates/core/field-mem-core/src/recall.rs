@@ -1,5 +1,4 @@
 use crate::physics::impact;
-use crate::math::moving_avg_direction;
 use crate::types::{AnchorKey, Event, ImpactTrace, Vector};
 
 /// Passive 1: value initialization.
@@ -83,19 +82,18 @@ pub fn recall(
     }
 }
 
-/// Memory consolidation: light relaxation from query (recall as a lightweight event).
-/// Increases density of strongly-hit anchors.
+/// Memory consolidation: recall reinforces density of strongly-hit anchors.
+///
+/// Only increases density — does NOT modify direction.
+/// Direction drift should only come from the relaxation cycle (RelaxationCycle::run),
+/// which is the field's single evolution mechanism. Allowing consolidate_from_recall
+/// to also pull direction would be an uncontrolled second drift path.
 pub fn consolidate_from_recall(anchors: &mut [AnchorKey], query_dir: &Vector, threshold: f32) {
     for anchor in anchors.iter_mut() {
         let imp = impact(anchor, query_dir);
         if imp > threshold {
             anchor.density += 1;
             anchor.update_mechanics();
-            // Slight direction pull toward query
-            let rate = 0.01 / (anchor.density as f32);
-            anchor.direction = moving_avg_direction(
-                &anchor.direction, query_dir, rate,
-            );
         }
     }
 }

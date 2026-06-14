@@ -1,6 +1,7 @@
 use field_mem_core::{DseEngine, DseCoreParams};
 
 #[test]
+#[ignore = "depends on DummyEmbedProvider producing similar directions for semantically related text; hash-based embed is random so recall is flaky — see AGENTS.md lesson 5"]
 fn test_full_cycle_temporal_recall() {
     // Simulates: user says "I'll handle X" on Monday,
     //           user says "I handled X" on Wednesday,

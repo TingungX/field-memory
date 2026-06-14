@@ -572,7 +572,9 @@ pub async fn seed(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SeedRequest>,
 ) -> Json<SeedResponse> {
-    let events_per = req.events_per_anchor.unwrap_or(8).max(1);
+    // events_per_anchor is accepted for API compatibility but no longer used;
+    // event count is now derived from density (see step 2 below).
+    let _events_per = req.events_per_anchor.unwrap_or(0);
     let cycles = req.relax_cycles.unwrap_or(3).max(1);
 
     // 1. Create anchors
@@ -586,28 +588,17 @@ pub async fn seed(
         engine.init(&concepts);
     }
 
-    // 2. Generate and inject synthetic events
+    // 2. Seed events: inject the concept label itself, repeated proportional
+    //    to density. Template-generated filler (e.g. "xxx: 这是最核心的原则")
+    //    carries zero real information and pollutes recall with noise.
     {
         let eng = state.engine.clone();
         let mut engine = eng.lock().unwrap();
-        let modifiers = [
-            "擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
-            "讨论过", "遇到的问题", "学到的教训",
-        ];
 
         for concept in &req.concepts {
-            for i in 0..events_per {
-                let mod_idx = i.min(modifiers.len() - 1);
-                let event_text = if mod_idx == 0 {
-                    format!("{}: 这是最核心的原则", concept.label)
-                } else {
-                    format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], concept.label)
-                };
-                engine.on_user_input(&event_text);
-
-                if i % 3 == 0 {
-                    engine.on_user_input(&format!("关于{}的补充思考第{}条", concept.label, i + 1));
-                }
+            let repeats = concept.density.min(5).max(1) as usize;
+            for _ in 0..repeats {
+                engine.on_user_input(&concept.label);
             }
         }
     }

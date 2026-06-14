@@ -148,10 +148,11 @@ fn execute_seed_memory(
         }).to_string();
     }
 
-    let events_per = 10usize;
-    let cycles = 5usize;
-    let modifiers = ["擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
-                      "讨论过", "遇到的问题", "学到的教训"];
+    // Seed phase: create anchors with the concept label itself as the semantic
+    // event. Template-generated filler (e.g. "xxx: 这是最核心的原则") carries
+    // zero real information and pollutes recall with noise. Real density should
+    // come from genuine user interaction, not synthetic padding.
+    let cycles = 3usize;
 
     {
         let mut eng = engine.lock().unwrap();
@@ -159,18 +160,13 @@ fn execute_seed_memory(
     }
     {
         let mut eng = engine.lock().unwrap();
-        for (label, _) in &new_concepts {
-            for i in 0..events_per {
-                let mod_idx = i.min(modifiers.len() - 1);
-                let event_text = if mod_idx == 0 {
-                    format!("{}: 这是最核心的原则", label)
-                } else {
-                    format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], label)
-                };
-                eng.on_input_with_source(&event_text, EventSource::Seed);
-                if i % 3 == 0 {
-                    eng.on_input_with_source(&format!("关于{}的补充思考第{}条", label, i + 1), EventSource::Seed);
-                }
+        for (label, density) in &new_concepts {
+            // Inject the concept label itself as a seed event, repeated
+            // proportional to density (clamped). This gives the anchor a
+            // meaningful semantic footprint without garbage text.
+            let repeats = (*density).min(5).max(1) as usize;
+            for _ in 0..repeats {
+                eng.on_input_with_source(label, EventSource::Seed);
             }
         }
     }

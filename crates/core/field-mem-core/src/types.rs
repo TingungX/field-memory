@@ -72,17 +72,39 @@ pub struct AnchorKey {
 impl AnchorKey {
     pub fn new(id: AnchorId, label: String, direction: Vector, initial_density: u32) -> Self {
         let density = initial_density.max(1);
-        let stiffness = (density as f32).sqrt();
-        let damping = 1.0 / (density as f32).sqrt();
+        let (stiffness, damping) = Self::compute_mechanics(density);
         let origin_direction = direction.clone();
         Self { id, label, direction, density, stiffness, damping, origin_direction }
     }
 
-    /// Recompute stiffness and damping from current density
+    /// Recompute stiffness and damping from current density.
+    ///
+    /// - **stiffness = √d** — higher density → stronger response to relevant events
+    /// - **damping = √d** — higher density → stronger restoring force (resists drift)
+    ///
+    /// Both grow with density, but their effects are opposing:
+    /// stiffness drives the anchor toward the perturbation (push),
+    /// damping pulls it back toward its previous position (pull).
+    /// A high-density anchor responds vigorously but also resists permanent drift.
     pub fn update_mechanics(&mut self) {
-        let d = (self.density as f32).max(1.0);
-        self.stiffness = d.sqrt();
-        self.damping = 1.0 / d.sqrt();
+        let (s, d) = Self::compute_mechanics(self.density);
+        self.stiffness = s;
+        self.damping = d;
+    }
+
+    fn compute_mechanics(density: u32) -> (f32, f32) {
+        let d = (density as f32).max(1.0);
+        let sqrt_d = d.sqrt();
+        (sqrt_d, sqrt_d)
+    }
+}
+
+impl AnchorKey {
+    /// Measure how much the anchor has drifted from its birth direction.
+    /// Returns cosine distance (0 = identical, 2 = opposite).
+    /// Diagnostic tool — not used in field calculations.
+    pub fn drift(&self) -> f32 {
+        crate::math::cosine_distance(&self.direction, &self.origin_direction)
     }
 }
 
