@@ -126,11 +126,16 @@ field-memory/
 
 ### 前端规约
 
-- **HTML/CSS/JS 三文件分离** — 不写单体 HTML。HTML 只保留骨架，样式在 `.css`，逻辑在 `.js`。
-- **侧栏面板可折叠** — 所有侧栏/面板必须有折叠/展开机制，状态用 `sessionStorage` 持久化。
-- **折叠按钮始终可见** — 折叠后用户必须能找到展开入口，不能把按钮藏在折叠区域内。
-- **field.js 是 ES module** — 用 `importmap` + `<script type="module" src="field.js">`，不能回退为内联 script。
-- **`computeCanvasSize()` 感知面板状态** — 面板折叠时宽度为 0，canvas 自动扩展。
+- **React + Next.js (static export)** — 使用 React 组件 + Next.js App Router，禁止手写 DOM 操作。
+- **CSS Modules + CSS 变量** — 每个组件使用 `.module.css`，共享样式在 `globals.css` 中定义 CSS 变量。
+- **`'use client'` 显式标记** — 所有包含浏览器端逻辑（事件、状态、ref、hooks）的组件文件第一行必须是 `'use client'`。
+- **`dynamic()` + `ssr: false`** — 对包含 `localStorage` / `sessionStorage` 访问的组件使用 dynamic import + SSR 禁用。
+- **SSR 安全** — 不要在 `useState` 初始化器或模块顶层访问 `window`、`localStorage`、`sessionStorage`；放在 `useEffect` 或惰性初始化器中。
+- **类型定义汇总** — `src/types/index.ts` 所有类型定义汇总，不分散在组件中。
+- **API 封装** — 所有 HTTP 请求通过 `lib/api.ts` 的 `apiCall` 函数。
+- **视觉风格遵守** — 使用已有 CSS 变量（`--bg`, `--surface`, `--text`, `--accent`, `--border`, `--tag-bg`, `--panel-bg`, `--user-bubble`, `--text-muted`），不引入新颜色变量。
+- **不使用 emoji，倾向于 icon 而非文字标签**。
+- **面板折叠** — 侧栏面板通过 CSS transition 实现折叠，`collapsed` clsas 设置 `width: 0; padding: 0; border: none; margin: 0; opacity: 0; pointer-events: none`。
 
 ## 测试规约
 

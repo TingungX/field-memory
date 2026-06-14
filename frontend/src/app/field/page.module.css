@@ -1,0 +1,148 @@
+.page {
+  width: 100%;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #050810;
+  color: #e0e0e0;
+  overflow: hidden;
+}
+
+.topbar {
+  flex-shrink: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: rgba(14, 17, 22, 0.85);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  z-index: 20;
+  gap: 12px;
+}
+
+.brand {
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c0c8d0;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #4a6fa5;
+  flex-shrink: 0;
+}
+
+.sub {
+  font-size: 10px;
+  color: #667;
+  font-weight: 400;
+}
+
+.stats {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.statLbl {
+  color: #667;
+}
+
+.statVal {
+  color: #c0c8d0;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ctrlBtn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #aab;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ctrlBtn:hover {
+  background: rgba(255,255,255,0.12);
+  color: #e0e0e0;
+}
+
+.ctrlBtn.active {
+  background: rgba(74, 111, 165, 0.3);
+  border-color: rgba(74, 111, 165, 0.5);
+  color: #8ab;
+}
+
+.canvasContainer {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.canvasContainer canvas {
+  display: block;
+}
+
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(0,0,0,0.8);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #e0e0e0;
+  z-index: 30;
+  display: none;
+  max-width: 200px;
+  line-height: 1.4;
+}
+
+.tooltip.visible {
+  display: block;
+}
+
+.tooltipName {
+  color: #8ab;
+  font-weight: 500;
+}
+
+.tooltipDensity {
+  color: #667;
+  font-size: 10px;
+}
+
+.bottomBar {
+  flex-shrink: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: rgba(14, 17, 22, 0.85);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 9px;
+  color: #445;
+  gap: 16px;
+}
+

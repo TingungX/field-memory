@@ -1,0 +1,54 @@
+.rail {
+  width: var(--rail-width);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 4px;
+  z-index: 8;
+}
+
+.btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+.btn:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.btn.active {
+  background: var(--tag-bg);
+  color: var(--accent);
+}
+
+.btn.active::after {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+

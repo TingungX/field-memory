@@ -1,0 +1,38 @@
+.header {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  z-index: 10;
+}
+
+.header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.headerBtn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.headerBtn:hover { background: var(--bg); }
+
+.columns {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+}
+

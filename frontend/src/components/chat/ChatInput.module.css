@@ -1,0 +1,76 @@
+.area {
+  flex-shrink: 0;
+  padding: 12px 20px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  position: relative;
+}
+
+.effort {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  text-align: center;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+}
+
+.effort:focus { border-color: #888; }
+
+.inputWrap {
+  flex: 1;
+  position: relative;
+}
+
+.input {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: var(--font);
+  line-height: 1.5;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+
+.input:focus { border-color: #888; }
+
+.input::placeholder { color: #aaa; }
+
+.sendBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: #1a1a1a;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sendBtn:hover { opacity: 0.85; }
+
+.sendBtn:disabled { opacity: 0.4; cursor: default; }
+
+.stopBtn {
+  background: #c33;
+}
+

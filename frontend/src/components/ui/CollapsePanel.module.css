@@ -1,0 +1,46 @@
+.wrap {
+  /* container */
+}
+
+.toggle {
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 3px;
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+  background: none;
+  border: none;
+  font-family: var(--font);
+}
+
+.toggle:hover { color: var(--text); }
+
+.chevron {
+  width: 8px;
+  height: 8px;
+  transition: transform 0.15s;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.toggleOpen { color: var(--text); }
+
+.content {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--tag-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+  max-height: 240px;
+  overflow-y: auto;
+}
+

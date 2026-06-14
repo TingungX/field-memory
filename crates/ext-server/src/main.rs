@@ -117,7 +117,7 @@ async fn main() {
 .route("/api/sessions/{id}", axum::routing::patch(sessions::patch).delete(sessions::delete))
         .route("/api/sessions/{id}/messages", axum::routing::post(sessions::append_message))
 .route("/api/sessions/{id}/messages/{idx}", axum::routing::patch(sessions::update_message).delete(sessions::delete_message))
-        // Dedicated 3D field visualization page
+        // Backward compat: field visualization page (new frontend also handles it)
         .route("/field", axum::routing::get_service(ServeFile::new("crates/ext-server/src/static/field.html")))
         .fallback_service(
             ServeDir::new("crates/ext-server/src/static")

@@ -1,0 +1,46 @@
+.popover {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.item:hover, .selected {
+  background: var(--tag-bg);
+}
+
+.name {
+  font-weight: 500;
+  color: var(--accent);
+  font-family: SFMono-Regular, Menlo, monospace;
+}
+
+.alias {
+  color: var(--text-muted);
+  font-family: SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.desc {
+  color: var(--text-muted);
+  margin-left: auto;
+  font-size: 10px;
+}
+

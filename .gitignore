@@ -19,3 +19,4 @@ memory_state/
 
 # Playwright debug artifacts
 .playwright-cli/
+frontend/out/
