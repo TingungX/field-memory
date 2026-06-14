@@ -1,6 +1,6 @@
 use std::path::Path;
 use chrono::{DateTime, Utc, Duration};
-use crate::types::{AnchorKey, Event, ImpactTrace, SeedConcept, EventId};
+use crate::types::{AnchorKey, Event, ImpactTrace, SeedConcept, EventId, EventSource};
 use crate::embed::{EmbedProvider, DummyEmbedProvider};
 use crate::cycle::RelaxationCycle;
 use crate::recall::{value_init, associate, recall, consolidate_from_recall, RecallResult};
@@ -116,9 +116,19 @@ impl DseEngine {
     // ================================================================
 
     /// Accept user input text, return event ID.
+    /// Defaults to `EventSource::User` — use `on_input_with_source` for other sources.
     pub fn on_user_input(&mut self, text: &str) -> EventId {
+        self.on_input_with_source(text, EventSource::User)
+    }
+
+    /// Accept input text with an explicit source classification.
+    ///
+    /// Only `User`-source events represent genuine user knowledge.
+    /// `Seed`, `RecallEcho`, and `System` events are still stored but
+    /// can be filtered by callers to prevent duplicate ingestion.
+    pub fn on_input_with_source(&mut self, text: &str, source: EventSource) -> EventId {
         let direction = self.embed.embed(text);
-        let event = Event::new(EventId::new(), direction, text.to_string());
+        let event = Event::with_source(EventId::new(), direction, text.to_string(), source);
         let id = event.id;
         let preview = {
             let char_count = text.chars().count();
@@ -129,7 +139,7 @@ impl DseEngine {
             }
         };
         self.events.push(event);
-        self.log_activity(ActivityKind::EventInput, format!("事件 #{}: 「{}」", id.0, preview));
+        self.log_activity(ActivityKind::EventInput, format!("事件 #{} [{:?}]: 「{}」", id.0, source, preview));
         id
     }
 

@@ -5,6 +5,31 @@ use serde::{Deserialize, Serialize};
 pub type Vector = Vec<f32>;
 
 // ================================================================
+// EventSource — where an event came from
+// ================================================================
+
+/// Classifies the origin of an event to prevent duplicate ingestion.
+///
+/// - `User`    — genuine user input, always recorded
+/// - `Seed`    — synthetic events from `seed_memory` tool
+/// - `RecallEcho` — content that originated from a recall (should NOT be re-ingested)
+/// - `System`  — system prompt / framework-generated text (should NOT be re-ingested)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSource {
+    User,
+    Seed,
+    RecallEcho,
+    System,
+}
+
+impl Default for EventSource {
+    fn default() -> Self {
+        Self::User
+    }
+}
+
+// ================================================================
 // Event
 // ================================================================
 
@@ -14,11 +39,18 @@ pub struct Event {
     pub direction: Vector,
     pub text: String,
     pub timestamp: DateTime<Utc>,
+    /// Origin of this event — used to filter out recall echoes and system text.
+    #[serde(default)]
+    pub source: EventSource,
 }
 
 impl Event {
     pub fn new(id: EventId, direction: Vector, text: String) -> Self {
-        Self { id, direction, text, timestamp: Utc::now() }
+        Self { id, direction, text, timestamp: Utc::now(), source: EventSource::User }
+    }
+
+    pub fn with_source(id: EventId, direction: Vector, text: String, source: EventSource) -> Self {
+        Self { id, direction, text, timestamp: Utc::now(), source }
     }
 }
 
@@ -126,4 +158,3 @@ impl SeedId {
         Self(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 }
-

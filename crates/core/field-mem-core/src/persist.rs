@@ -43,15 +43,39 @@ pub fn load(
 ) -> Result<(Vec<AnchorKey>, Vec<Event>, Vec<ImpactTrace>, Vec<SeedConcept>), PersistError> {
     let db = sled::open(path)?;
 
-    let anchors: Vec<AnchorKey> = bincode::deserialize(
-        &db.get("anchors")?.ok_or_else(|| PersistError::MissingData("anchors"))?,
-    ).map_err(|e| PersistError::Serialization(e.to_string()))?;
-    let events: Vec<Event> = bincode::deserialize(
-        &db.get("events")?.ok_or_else(|| PersistError::MissingData("events"))?,
-    ).map_err(|e| PersistError::Serialization(e.to_string()))?;
-    let traces: Vec<ImpactTrace> = bincode::deserialize(
-        &db.get("traces")?.ok_or_else(|| PersistError::MissingData("traces"))?,
-    ).map_err(|e| PersistError::Serialization(e.to_string()))?;
+    let anchors_raw = db.get("anchors")?.ok_or_else(|| PersistError::MissingData("anchors"))?;
+    let anchors: Vec<AnchorKey> = bincode::deserialize(&anchors_raw)
+        .map_err(|e| PersistError::Serialization(format!("anchors: {e}")))?;
+
+    let events_raw = db.get("events")?.ok_or_else(|| PersistError::MissingData("events"))?;
+    let events: Vec<Event> = match bincode::deserialize(&events_raw) {
+        Ok(v) => v,
+        Err(_) => {
+            // Legacy data: events stored before EventSource was added.
+            // Parse as old format and backfill source = User.
+            #[derive(serde::Deserialize)]
+            struct LegacyEvent {
+                id: crate::types::EventId,
+                direction: crate::types::Vector,
+                text: String,
+                timestamp: chrono::DateTime<chrono::Utc>,
+            }
+            let legacy: Vec<LegacyEvent> = bincode::deserialize(&events_raw)
+                .map_err(|e| PersistError::Serialization(format!("events (legacy fallback): {e}")))?;
+            legacy.into_iter().map(|le| Event {
+                id: le.id,
+                direction: le.direction,
+                text: le.text,
+                timestamp: le.timestamp,
+                source: crate::types::EventSource::User,
+            }).collect()
+        }
+    };
+
+    let traces_raw = db.get("traces")?.ok_or_else(|| PersistError::MissingData("traces"))?;
+    let traces: Vec<ImpactTrace> = bincode::deserialize(&traces_raw)
+        .map_err(|e| PersistError::Serialization(format!("traces: {e}")))?;
+
     let seeds: Vec<SeedConcept> = bincode::deserialize(
         &db.get("seeds")?.unwrap_or_default(),
     ).unwrap_or_default();
@@ -67,4 +91,3 @@ struct Meta {
     trace_count: usize,
     seed_count: usize,
 }
-

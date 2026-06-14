@@ -14,6 +14,7 @@ pub use engine::DseEngine;
 pub use types::*;
 
 /// Core configuration — 5 parameters only
+#[derive(Clone)]
 pub struct DseCoreParams {
     pub vector_dim: usize,
     pub event_window_secs: u64,
@@ -33,4 +34,3 @@ impl Default for DseCoreParams {
         }
     }
 }
-
