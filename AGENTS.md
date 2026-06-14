@@ -110,6 +110,7 @@ field-memory/
 - **5 个配置参数** — `DseCoreParams` 只增不减需要计划更新。
 - **一文件一职责** — 不跨模块泄漏职责。
 - **`engine.rs` 只做编排** — 算法改动在 `physics.rs` / `cycle.rs` / `recall.rs`。
+- **工具三件套** — `init_field`（构建场）、`recall_memory`（召回）、无其他。
 
 ### 前端规约
 
