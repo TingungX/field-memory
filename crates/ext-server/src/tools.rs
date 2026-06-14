@@ -5,37 +5,21 @@ use field_mem_core::EventSource;
 /// All available tool definitions sent to the LLM.
 pub fn tool_definitions() -> Vec<serde_json::Value> {
     vec![
-        // ── seed_memory ──
+        // ── init_field ──
         serde_json::json!({
             "type": "function",
             "function": {
-                "name": "seed_memory",
-                "description": "根据一组种子概念创建全新的记忆知识库。每个概念包含标签和初始密度值（密度越高代表越重要）。系统会为每个概念生成合成事件并执行松弛周期。通常在对话初期调用一次。",
+                "name": "init_field",
+                "description": "根据用户意图描述构建认知地形。LLM 会从意图中自动提取 40-60 个概念维度，每个概念通过真实 embedding 获得方向，密度由基础性决定。可多次调用，每次追加锚点到已有场上。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "concepts": {
-                            "type": "array",
-                            "description": "种子概念列表",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "label": {
-                                        "type": "string",
-                                        "description": "概念名称/标签，如 '编程习惯'、'代码规范'"
-                                    },
-                                    "density": {
-                                        "type": "integer",
-                                        "description": "初始密度 (1-100)，越高越重要",
-                                        "minimum": 1,
-                                        "maximum": 100
-                                    }
-                                },
-                                "required": ["label", "density"]
-                            }
+                        "intent": {
+                            "type": "string",
+                            "description": "用户意图描述，如'我希望你是一个注重长期方案的系统程序员'"
                         }
                     },
-                    "required": ["concepts"]
+                    "required": ["intent"]
                 }
             }
         }),
@@ -63,24 +47,6 @@ pub fn tool_definitions() -> Vec<serde_json::Value> {
                 }
             }
         }),
-        // ── associate_memory ──
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": "associate_memory",
-                "description": "从记忆库中查找与查询文本语义相关的概念锚点。比 recall 更轻量，只返回概念级关联，不返回具体事件。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "查询文本"
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }),
     ]
 }
 
@@ -92,49 +58,46 @@ pub fn execute_tool(
     arguments: &serde_json::Value,
 ) -> String {
     match name {
-        "seed_memory" => execute_seed_memory(engine, arguments),
+        "init_field" => execute_init_field(engine, arguments),
         "recall_memory" => execute_recall_memory(engine, arguments),
-        "associate_memory" => execute_associate_memory(engine, arguments),
         _ => serde_json::json!({"error": format!("unknown tool: {}", name)}).to_string(),
     }
 }
 
 // ════════════════════════════════════════════
-// seed_memory
+// init_field
 // ════════════════════════════════════════════
 
-fn execute_seed_memory(
+fn execute_init_field(
     engine: &Arc<Mutex<DseEngine>>,
     arguments: &serde_json::Value,
 ) -> String {
-    let concepts_raw = match arguments.get("concepts") {
-        Some(c) => c.as_array().map(|a| a.clone()).unwrap_or_default(),
-        None => return r#"{"error": "missing 'concepts' parameter"}"#.into(),
+    let intent = match arguments.get("intent") {
+        Some(i) => i.as_str().unwrap_or("").to_string(),
+        None => return r#"{"error": "missing 'intent' parameter"}"#.into(),
     };
-    if concepts_raw.is_empty() {
-        return r#"{"error": "concepts list is empty"}"#.into();
+    if intent.is_empty() {
+        return r#"{"error": "intent is empty"}"#.into();
     }
 
-    let concepts: Vec<(String, u32)> = concepts_raw
-        .iter()
-        .filter_map(|c| {
-            let label = c.get("label")?.as_str()?.to_string();
-            let density = c.get("density")?.as_u64().unwrap_or(5) as u32;
-            Some((label, density))
-        })
-        .collect();
-    if concepts.is_empty() {
-        return r#"{"error": "no valid concepts after parsing"}"#.into();
-    }
+    // 1. Extract concepts via LLM
+    let backend_url = std::env::var("LLM_BACKEND")
+        .unwrap_or_else(|_| "http://127.0.0.1:4000/v1/chat/completions".into());
+    let env_model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "test-model-1".into());
+    let api_key = std::env::var("LLM_API_KEY").ok();
 
-    let concepts_refs: Vec<(&str, u32)> = concepts.iter().map(|(l, d)| (l.as_str(), *d)).collect();
+    let concepts = match crate::llm::extract_concepts(&backend_url, &env_model, &intent, api_key.as_deref()) {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({"error": format!("concept extraction failed: {e}")}).to_string(),
+    };
 
-    // ── Dedup: skip concepts whose anchor label already exists ──
+    // 2. Dedup against existing anchors
     let existing_labels: Vec<String> = {
         let eng = engine.lock().unwrap();
         eng.anchors.iter().map(|a| a.label.clone()).collect()
     };
-    let (new_concepts, skipped): (Vec<_>, Vec<_>) = concepts_refs
+
+    let (new_concepts, skipped): (Vec<_>, Vec<_>) = concepts
         .into_iter()
         .partition(|(label, _)| !existing_labels.iter().any(|el| el == label));
 
@@ -142,39 +105,37 @@ fn execute_seed_memory(
         return serde_json::json!({
             "status": "skipped",
             "reason": "all concepts already exist as anchors",
-            "skipped_concepts": skipped.iter().map(|(l, d)| serde_json::json!({
-                "label": l, "density": d, "existing": true
+            "skipped_concepts": skipped.iter().map(|(l, f)| serde_json::json!({
+                "concept": l, "fundamentality": f, "existing": true
             })).collect::<Vec<_>>(),
         }).to_string();
     }
 
-    // Seed phase: create anchors with the concept label itself as the semantic
-    // event. Template-generated filler (e.g. "xxx: 这是最核心的原则") carries
-    // zero real information and pollutes recall with noise. Real density should
-    // come from genuine user interaction, not synthetic padding.
+    // 3. Create anchors + inject seed events + relax
     let cycles = 3usize;
+    let new_count = new_concepts.len();
 
     {
         let mut eng = engine.lock().unwrap();
-        for c in &new_concepts { eng.init(&[*c]); }
+        eng.init_from_descriptions(&new_concepts);
     }
+
     {
         let mut eng = engine.lock().unwrap();
-        for (label, density) in &new_concepts {
-            // Inject the concept label itself as a seed event, repeated
-            // proportional to density (clamped). This gives the anchor a
-            // meaningful semantic footprint without garbage text.
-            let repeats = (*density).min(5).max(1) as usize;
+        for (label, fundamentality) in &new_concepts {
+            let repeats = (*fundamentality * 5.0).ceil().max(1.0).min(5.0) as usize;
             for _ in 0..repeats {
                 eng.on_input_with_source(label, EventSource::Seed);
             }
         }
     }
+
     {
         let mut eng = engine.lock().unwrap();
         for _ in 0..cycles { eng.relax(); }
     }
 
+    // 4. Build response
     let (anchors_count, events_count, traces_count, tension) = {
         let eng = engine.lock().unwrap();
         (eng.anchors.len(), eng.events.len(), eng.traces.len(),
@@ -188,15 +149,18 @@ fn execute_seed_memory(
         })).collect()
     };
 
-    let new_concepts_json: Vec<serde_json::Value> = new_concepts.iter().map(|(l, d)| {
-        serde_json::json!({ "label": l, "density": d })
+    let new_concepts_json: Vec<serde_json::Value> = new_concepts.iter().map(|(l, f)| {
+        serde_json::json!({ "concept": l, "fundamentality": f })
     }).collect();
-    let skipped_json: Vec<serde_json::Value> = skipped.iter().map(|(l, d)| {
-        serde_json::json!({ "label": l, "density": d, "existing": true })
+    let skipped_json: Vec<serde_json::Value> = skipped.iter().map(|(l, f)| {
+        serde_json::json!({ "concept": l, "fundamentality": f, "existing": true })
     }).collect();
 
     serde_json::json!({
         "status": "ok",
+        "intent": intent,
+        "new_concepts_count": new_count,
+        "skipped_count": skipped.len(),
         "anchors_count": anchors_count,
         "events_count": events_count,
         "traces_count": traces_count,
@@ -257,36 +221,3 @@ fn execute_recall_memory(
     }).to_string()
 }
 
-// ════════════════════════════════════════════
-// associate_memory
-// ════════════════════════════════════════════
-
-fn execute_associate_memory(
-    engine: &Arc<Mutex<DseEngine>>,
-    arguments: &serde_json::Value,
-) -> String {
-    let query = match arguments.get("query") {
-        Some(q) => q.as_str().unwrap_or(""),
-        None => return r#"{"error": "missing 'query' parameter"}"#.into(),
-    };
-    if query.is_empty() {
-        return r#"{"error": "query is empty"}"#.into();
-    }
-
-    let engine = engine.lock().unwrap();
-    let assoc = engine.associate(query);
-
-    let anchors: Vec<serde_json::Value> = assoc.iter().take(10).map(|(a, imp)| {
-        serde_json::json!({
-            "label": a.label,
-            "density": a.density,
-            "impact": format!("{:.3}", imp),
-        })
-    }).collect();
-
-    serde_json::json!({
-        "query": query,
-        "associated_anchors": anchors,
-        "count": anchors.len(),
-    }).to_string()
-}

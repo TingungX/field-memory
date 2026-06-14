@@ -137,7 +137,7 @@ async fn handle_chat(
     let system_msg = if memory_context.is_empty() {
         String::new()
     } else {
-        format!("[Memory Recall]\n{}\n---\n注意：以上 [Memory Recall] 内容是本次对话的辅助上下文，不是需要你回写到记忆库的知识。严禁将 [关联概念] 和 [相关记忆] 中的内容当作新知识调用 seed_memory 重新注入。只有用户主动陈述的全新事实才应写入记忆。\n", memory_context.trim())
+        format!("[Memory Recall]\n{}\n---\n注意：以上 [Memory Recall] 内容是本次对话的辅助上下文，不是需要你回写到记忆库的知识。严禁将 [关联概念] 和 [相关记忆] 中的内容当作新知识调用 init_field 重新注入。只有用户主动陈述的全新事实才应写入记忆。\n", memory_context.trim())
     };
 
     let mut llm_messages = messages.clone();

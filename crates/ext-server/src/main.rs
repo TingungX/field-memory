@@ -103,7 +103,7 @@ async fn main() {
         .route("/api/memory/load", axum::routing::post(memory_routes::load))
         .route("/api/memory/ping", axum::routing::get(memory_routes::ping))
         .route("/api/memory/init", axum::routing::post(memory_routes::init))
-        .route("/api/memory/seed", axum::routing::post(memory_routes::seed))
+        .route("/api/memory/init-field", axum::routing::post(memory_routes::init_field))
         .route("/api/memory/query", axum::routing::post(memory_routes::query))
         .route("/api/memory/libraries", axum::routing::get(memory_routes::list_libraries))
         .route("/api/memory/library/save", axum::routing::post(memory_routes::library_save))

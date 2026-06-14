@@ -127,21 +127,122 @@ pub(crate) struct InitResponse {
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct SeedRequest {
-    concepts: Vec<InitConcept>,
-    /// Number of synthetic events per anchor (default 8)
-    events_per_anchor: Option<usize>,
-    /// Relaxation cycles to run after seeding (default 3)
-    relax_cycles: Option<usize>,
+pub(crate) struct InitFieldRequest {
+    intent: String,
 }
 
 #[derive(serde::Serialize)]
-pub(crate) struct SeedResponse {
+pub(crate) struct InitFieldResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
     anchors_count: usize,
-    events_count: usize,
-    seeds_count: usize,
-    total_traces: usize,
+    new_concepts_count: usize,
+    skipped_count: usize,
     field_tension: f32,
+}
+
+/// POST /api/memory/init-field — LLM-driven field initialization
+///
+/// 1. Extract concepts from user intent via LLM
+/// 2. Create anchors from concepts (with fundamentality→density mapping)
+/// 3. Inject seed events
+/// 4. Run relaxation cycles
+/// 5. Persist to disk
+/// 6. Return result
+pub async fn init_field(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<InitFieldRequest>,
+) -> Json<InitFieldResponse> {
+    if req.intent.is_empty() {
+        return Json(InitFieldResponse {
+            ok: false,
+            error: Some("intent is empty".into()),
+            anchors_count: 0,
+            new_concepts_count: 0,
+            skipped_count: 0,
+            field_tension: 0.0,
+        });
+    }
+
+    // 1. Extract concepts via LLM (synchronous, ureq)
+    let backend_url = std::env::var("LLM_BACKEND")
+        .unwrap_or_else(|_| "http://127.0.0.1:4000/v1/chat/completions".into());
+    let env_model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "test-model-1".into());
+    let api_key = std::env::var("LLM_API_KEY").ok();
+
+    let concepts = match crate::llm::extract_concepts(&backend_url, &env_model, &req.intent, api_key.as_deref()) {
+        Ok(c) => c,
+        Err(e) => return Json(InitFieldResponse {
+            ok: false,
+            error: Some(format!("concept extraction failed: {e}")),
+            anchors_count: 0,
+            new_concepts_count: 0,
+            skipped_count: 0,
+            field_tension: 0.0,
+        }),
+    };
+
+    // 2. Dedup against existing anchors
+    let existing_labels: Vec<String> = {
+        let engine = state.engine.lock().unwrap();
+        engine.anchors.iter().map(|a| a.label.clone()).collect()
+    };
+    let (new_concepts, skipped): (Vec<_>, Vec<_>) = concepts
+        .into_iter()
+        .partition(|(label, _)| !existing_labels.iter().any(|el| el == label));
+
+    if new_concepts.is_empty() {
+        let engine = state.engine.lock().unwrap();
+        return Json(InitFieldResponse {
+            ok: true,
+            error: None,
+            anchors_count: engine.anchors.len(),
+            new_concepts_count: 0,
+            skipped_count: skipped.len(),
+            field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
+        });
+    }
+
+    // 3. Create anchors + inject seed events + relax
+    let new_count = new_concepts.len();
+    let cycles = 3;
+
+    {
+        let mut engine = state.engine.lock().unwrap();
+        engine.init_from_descriptions(&new_concepts);
+    }
+    {
+        let mut engine = state.engine.lock().unwrap();
+        for (label, fundamentality) in &new_concepts {
+            let repeats = (*fundamentality * 5.0).ceil().max(1.0).min(5.0) as usize;
+            for _ in 0..repeats {
+                engine.on_input_with_source(label, field_mem_core::EventSource::Seed);
+            }
+        }
+    }
+    {
+        let mut engine = state.engine.lock().unwrap();
+        for _ in 0..cycles { engine.relax(); }
+    }
+
+    // 4. Persist to disk
+    {
+        let lib_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap()));
+        let engine = state.engine.lock().unwrap();
+        let _ = engine.save(&lib_path);
+    }
+
+    // 5. Return result
+    let engine = state.engine.lock().unwrap();
+    Json(InitFieldResponse {
+        ok: true,
+        error: None,
+        anchors_count: engine.anchors.len(),
+        new_concepts_count: new_count,
+        skipped_count: skipped.len(),
+        field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -558,74 +659,5 @@ pub async fn init(
     engine.init(&concepts);
     Json(InitResponse {
         anchors_count: engine.anchors.len(),
-    })
-}
-
-/// POST /api/memory/seed — large-scale memory seeding
-///
-/// 1. Create anchors from seed concepts
-/// 2. Generate synthetic events from concept variations
-/// 3. Run multiple relaxation cycles
-/// 4. Persist to disk
-/// 5. Return final field state
-pub async fn seed(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SeedRequest>,
-) -> Json<SeedResponse> {
-    // events_per_anchor is accepted for API compatibility but no longer used;
-    // event count is now derived from density (see step 2 below).
-    let _events_per = req.events_per_anchor.unwrap_or(0);
-    let cycles = req.relax_cycles.unwrap_or(3).max(1);
-
-    // 1. Create anchors
-    let concepts: Vec<(&str, u32)> = req
-        .concepts
-        .iter()
-        .map(|c| (c.label.as_str(), c.density))
-        .collect();
-    {
-        let mut engine = state.engine.lock().unwrap();
-        engine.init(&concepts);
-    }
-
-    // 2. Seed events: inject the concept label itself, repeated proportional
-    //    to density. Template-generated filler (e.g. "xxx: 这是最核心的原则")
-    //    carries zero real information and pollutes recall with noise.
-    {
-        let eng = state.engine.clone();
-        let mut engine = eng.lock().unwrap();
-
-        for concept in &req.concepts {
-            let repeats = concept.density.min(5).max(1) as usize;
-            for _ in 0..repeats {
-                engine.on_user_input(&concept.label);
-            }
-        }
-    }
-
-    // 3. Run relaxation cycles
-    {
-        let eng = state.engine.clone();
-        let mut engine = eng.lock().unwrap();
-        for _ in 0..cycles {
-            engine.relax();
-        }
-    }
-
-    // 4. Persist to disk
-    {
-        let lib_path = std::path::PathBuf::from(format!("./libraries/{}", state.active_library.lock().unwrap()));
-        let engine = state.engine.lock().unwrap();
-        let _ = engine.save(&lib_path);
-    }
-
-    // 5. Return result
-    let engine = state.engine.lock().unwrap();
-    Json(SeedResponse {
-        anchors_count: engine.anchors.len(),
-        events_count: engine.events.len(),
-        seeds_count: engine.seeds.len(),
-        total_traces: engine.traces.len(),
-        field_tension: engine.ecg_report().map(|r| r.current.tension).unwrap_or(0.0),
     })
 }

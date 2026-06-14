@@ -215,3 +215,105 @@ pub async fn stream_chat(
     };
     Box::pin(sse_stream)
 }
+
+
+// ════════════════════════════════════════════
+// Concept extraction for init_field
+// ════════════════════════════════════════════
+
+/// Extract concepts from user intent description using LLM (synchronous, ureq-based).
+/// Returns Vec<(concept_label, fundamentality)> where fundamentality is 0.0–1.0.
+pub fn extract_concepts(
+    backend_url: &str,
+    model: &str,
+    user_intent: &str,
+    api_key: Option<&str>,
+) -> Result<Vec<(String, f32)>, String> {
+    let prompt = format!(
+        "你正在为一个势能场记忆系统构建初始认知地形。\
+从以下用户意图描述中提取 40-60 个核心概念维度。\n\n\
+规则：\n\
+- 概念应该是该领域的基础维度，不是具体事实\n\
+- fundamentality 越高表示该概念越核心、越不可绕过\n\
+- 概念之间应该有足够的语义差异（不要列出近义词）\n\
+- 不要包含用户偏好本身（如\"喜欢Rust\"），而是偏好背后的维度（如\"类型安全直觉\"）\n\
+- 输出必须是纯 JSON 数组，不要有其他文字\n\n\
+用户意图描述：{}\n\n\
+输出格式（严格 JSON 数组）：\n\
+[{{\"concept\": \"概念名\", \"fundamentality\": 0.8}}, ...]",
+        user_intent
+    );
+
+    let messages = serde_json::json!([
+        {"role": "user", "content": prompt}
+    ]);
+
+    let body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+    });
+
+    let env_key = std::env::var("LLM_API_KEY").ok();
+    let key = api_key
+        .filter(|k| !k.is_empty())
+        .or_else(|| env_key.as_deref())
+        .unwrap_or_default();
+
+    let config = ureq::config::Config::builder().build();
+    let agent = ureq::Agent::new_with_config(config);
+
+    let mut req = agent.post(backend_url);
+    if !key.is_empty() {
+        req = req.header("Authorization", &format!("Bearer {}", key));
+    }
+    req = req.header("Content-Type", "application/json");
+
+    let resp = req.send_json(&body).map_err(|e| format!("LLM request failed: {e}"))?;
+
+    let mut resp_body = resp.into_body();
+    let resp_text = resp_body.read_to_string().map_err(|e| format!("read response failed: {e}"))?;
+
+    // Parse the OpenAI-compatible response
+    let resp_json: serde_json::Value =
+        serde_json::from_str(&resp_text).map_err(|e| format!("parse response failed: {e}"))?;
+
+    let content = resp_json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "no content in LLM response".to_string())?;
+
+    // The LLM may wrap the JSON in markdown code blocks — strip them
+    let content_clean = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    let concepts_array: serde_json::Value =
+        serde_json::from_str(content_clean).map_err(|e| {
+            format!("parse concepts JSON failed: {e}\nraw content: {content}")
+        })?;
+
+    let arr = concepts_array
+        .as_array()
+        .ok_or_else(|| "concepts response is not a JSON array".to_string())?;
+
+    let mut concepts = Vec::new();
+    for item in arr {
+        let concept = item["concept"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        let fundamentality = item["fundamentality"].as_f64().unwrap_or(0.5) as f32;
+        if !concept.is_empty() && fundamentality > 0.0 {
+            concepts.push((concept, fundamentality.clamp(0.01, 1.0)));
+        }
+    }
+
+    if concepts.is_empty() {
+        return Err("no valid concepts extracted from LLM response".to_string());
+    }
+
+    Ok(concepts)
+}

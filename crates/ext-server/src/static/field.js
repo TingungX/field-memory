@@ -11,6 +11,10 @@ const LAYER_COLORS = {
 const SPHERE_RADIUS = 5.2;
 const ANCHOR_BASE_SIZE = 0.08;
 const ANCHOR_SIZE_K = 0.07;
+const LARGE_FIELD_THRESHOLD = 50;     // anchors above this trigger dimming/label simplification
+const CONN_SIMPLIFY_THRESHOLD = 80;   // anchors above this simplify connection lines
+const CONN_TOP_K = 30;                // max anchors for connection lines in simplified mode
+const LABEL_TOP_K = 20;               // max labels shown in large fields by default
 
 // ── State ─────────────────────────────────────────
 const state = {
@@ -176,13 +180,15 @@ const HALO_TEX = makeHaloTexture();
 
 // ── Anchor pool (efficient reuse) ─────────────────
 class AnchorNode {
-  constructor(a) {
+  constructor(a, maxDensity) {
     this.data = a;
     const layer = layerOf(a.density);
     const color = LAYER_COLORS[layer];
     this.layer = layer;
     this.color = color;
-    const size = ANCHOR_BASE_SIZE + Math.sqrt(a.density) * ANCHOR_SIZE_K;
+    // Density-aware scaling: core anchors are visually larger
+    const densityRatio = maxDensity > 0 ? 0.5 + 0.5 * (a.density / maxDensity) : 1.0;
+    const size = ANCHOR_BASE_SIZE + Math.sqrt(a.density) * ANCHOR_SIZE_K * densityRatio;
 
     // Core sphere
     const geo = new THREE.SphereGeometry(size, 24, 18);
@@ -274,11 +280,16 @@ function rebuildConnections() {
     connMesh = null;
   }
   if (!state.showConnections) return;
-  const visible = Array.from(nodesById.values()).filter(n =>
+  let visible = Array.from(nodesById.values()).filter(n =>
     state.visibleLayers[n.layer] &&
     n.data.density >= state.densityMin &&
     n.data.density <= state.densityMax
   );
+  // Simplify connection lines for large fields
+  if (visible.length > CONN_SIMPLIFY_THRESHOLD) {
+    visible.sort((a, b) => b.data.density - a.data.density);
+    visible = visible.slice(0, CONN_TOP_K);
+  }
   const positions = [];
   const colors = [];
   for (let i = 0; i < visible.length; i++) {
@@ -314,6 +325,13 @@ function cosSim(a, b) {
   return den < 1e-9 ? 0 : dot / den;
 }
 function layerOf(d) { return d > 15 ? 'L1' : d > 8 ? 'L2' : d > 3 ? 'L3' : 'L4'; }
+
+function computeDensityMedian(anchors) {
+  if (anchors.length === 0) return 0;
+  const sorted = anchors.map(a => a.density).sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
 
 // ── PCA projection (32-dim → 3-dim) ───────────────
 function pca3(vectors) {
@@ -405,6 +423,7 @@ function layoutAnchors(anchors) {
   const { positions } = state.projMode === 'pca' ? pca3(vectors) : first3Project(vectors);
 
   // Add/update nodes
+  const maxDensity = anchors.reduce((m, a) => Math.max(m, a.density), 0);
   const newIds = new Set();
   for (let i = 0; i < anchors.length; i++) {
     const a = anchors[i];
@@ -414,7 +433,8 @@ function layoutAnchors(anchors) {
       const n = nodesById.get(a.id);
       // Update data
       n.data = a;
-      const size = ANCHOR_BASE_SIZE + Math.sqrt(a.density) * ANCHOR_SIZE_K;
+      const densityRatio = maxDensity > 0 ? 0.5 + 0.5 * (a.density / maxDensity) : 1.0;
+      const size = ANCHOR_BASE_SIZE + Math.sqrt(a.density) * ANCHOR_SIZE_K * densityRatio;
       n.mesh.geometry.dispose();
       n.mesh.geometry = new THREE.SphereGeometry(size, 24, 18);
       n.mesh.material.color.setHex(n.color);
@@ -422,7 +442,7 @@ function layoutAnchors(anchors) {
       n.halo.scale.set(size * 4.5, size * 4.5, 1);
       n.setPosition(x, y, z);
     } else {
-      const n = new AnchorNode(a);
+      const n = new AnchorNode(a, maxDensity);
       n.setPosition(x, y, z);
       nodesById.set(a.id, n);
       anchorGroup.add(n.group);
@@ -442,12 +462,32 @@ function layoutAnchors(anchors) {
 }
 
 function applyFilters() {
+  // Compute density median for large-scale dimming
+  const allAnchors = state.anchors;
+  const isLarge = allAnchors.length > LARGE_FIELD_THRESHOLD;
+  const densityMedian = isLarge ? computeDensityMedian(allAnchors) : 0;
+  // Top-K labels for large fields
+  const topLabelIds = isLarge
+    ? allAnchors.sort((a, b) => b.density - a.density).slice(0, LABEL_TOP_K).map(a => a.id)
+    : null;
+
   for (const n of nodesById.values()) {
     const ok = state.visibleLayers[n.layer] &&
                n.data.density >= state.densityMin &&
                n.data.density <= state.densityMax;
     n.group.visible = ok;
-    n.label.visible = ok && state.showLabels;
+    // Large-scale dimming: anchors below median get dimmed
+    if (ok && isLarge && n.data.density < densityMedian) {
+      n.setDimmed(true);
+    } else if (ok) {
+      n.setDimmed(false);
+    }
+    // Label visibility: in large fields, only top-K by density show labels by default
+    if (ok && state.showLabels) {
+      n.label.visible = topLabelIds ? topLabelIds.includes(n.data.id) : true;
+    } else {
+      n.label.visible = false;
+    }
   }
   rebuildConnections();
   applyFocus();
@@ -457,17 +497,31 @@ function applyFilters() {
 // When something is hovered/selected, dim the rest and show the focus label.
 function applyFocus() {
   const focusId = state.selectedId || state.hoverId;
-  const showFocusLabel = !!focusId; // always show the focused anchor's label
+  const isLarge = state.anchors.length > LARGE_FIELD_THRESHOLD;
+  const topLabelIds = isLarge
+    ? state.anchors.sort((a, b) => b.density - a.density).slice(0, LABEL_TOP_K).map(a => a.id)
+    : null;
+
   for (const [id, n] of nodesById) {
     if (!n.group.visible) continue;
     if (focusId == null) {
-      n.setDimmed(false);
-      n.label.visible = n.group.visible && state.showLabels;
+      // No focus: re-apply large-scale dimming logic
+      const densityMedian = isLarge ? computeDensityMedian(state.anchors) : 0;
+      if (isLarge && n.data.density < densityMedian) {
+        n.setDimmed(true);
+      } else {
+        n.setDimmed(false);
+      }
+      if (state.showLabels) {
+        n.label.visible = topLabelIds ? topLabelIds.includes(n.data.id) : true;
+      } else {
+        n.label.visible = false;
+      }
     } else {
       const isFocus = id === focusId;
       n.setDimmed(!isFocus);
       // Focused anchor always shows its label; non-focused obey the master toggle
-      n.label.visible = isFocus ? true : (n.group.visible && state.showLabels);
+      n.label.visible = isFocus ? true : (n.group.visible && state.showLabels && (!topLabelIds || topLabelIds.includes(n.data.id)));
     }
   }
 }
@@ -771,7 +825,7 @@ dminSlider.addEventListener('input', syncDensity);
 dmaxSlider.addEventListener('input', syncDensity);
 
 bindToggle('t-labels', 'showLabels', () => {
-  for (const n of nodesById.values()) n.label.visible = n.group.visible && state.showLabels;
+  applyFilters();
 });
 bindToggle('t-connections', 'showConnections', () => { rebuildConnections(); updateHud(); });
 bindToggle('t-grid', 'showGrid', () => { gridGroup.visible = state.showGrid; });

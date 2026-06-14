@@ -34,6 +34,16 @@ impact(anchor, event) = cos_sim(anchor.direction, event.direction) × √density
 
 这是**唯一的物理量**。范式转移、ECG、召回、持久化全部由此推导。不允许在 impact 中加入时间衰减、来源加权、情感因子等"改进"——每一个都是在引入场不承认的分类与判断。
 
+### 6. 场的构建是唯一合法的 LLM 调用
+
+`init` 时 LLM 从用户意图描述中提取 40-60 个概念维度，这是场里**唯一合法的 LLM 调用**。这不是"运行时判断"，是"场的构建"——场诞生前它不存在，LLM 帮它获得初始结构。场运行后，所有行为从 `impact()` 涌现，不再调用 LLM。
+
+交互模式：用户说"我希望你是什么样的"，而不是"你是什么样的"。一句话 → LLM 展开地形 → 概念 embedding → 密集锚点场。
+
+### 7. 场是逐层沉积的，不是一次性浇筑
+
+init 可以多次调用。每次追加 40-60 个锚点到已有场上。新锚点与已有锚点之间自然产生 impact 关系。场是逐步增长的多元地形，没有人工上限——LLM 觉得这个领域有 80 个维度就 80 个。5-10 个"我喜欢橙色"式的锚点不是场，是 hashmap 的糟糕实现。
+
 ## 设计意图
 
 field-memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是：
@@ -41,6 +51,7 @@ field-memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是�
 - 记忆不是静态存储，是系统被事件扰动后收敛到的**平衡态**
 - 概念的意义由关联事件的**空间密度**动态赋予，不由硬编码标签决定
 - 系统拒绝分类与判断。没有 Gap、Valence、Emotion、RecallStamp。所有行为从**一个物理量**涌现
+- 场是认知地形，不是用户偏好通讯录。init 构建密集锚点场，用户偏好是场建立后的微扰
 
 核心方程：
 
@@ -98,7 +109,8 @@ field-memory/
 
 | 亮点 | 说明 |
 |---|---|
-| 无 LLM 判定 | Event 输入只有 `text -> embedding -> direction`，不调用 LLM |
+| 无 LLM 运行时判定 | Event 输入只有 `text -> embedding -> direction`，运行时不调用 LLM |
+| init 是唯一 LLM 调用 | 场构建时 LLM 提取概念维度，之后纯物理涌现 |
 | 唯一演化入口 | `RelaxationCycle.run()` 是场状态变化的唯一路径，无旁路 |
 | 自稳力学 | stiffness = damping = √d：高密度锚点响应强但恢复力也强，场自然抗拒坍缩 |
 | 召回 = 写入同广播 | 查询和事件走同一个 `impact()` 函数 |
@@ -110,7 +122,7 @@ field-memory/
 - **5 个配置参数** — `DseCoreParams` 只增不减需要计划更新。
 - **一文件一职责** — 不跨模块泄漏职责。
 - **`engine.rs` 只做编排** — 算法改动在 `physics.rs` / `cycle.rs` / `recall.rs`。
-- **工具三件套** — `init_field`（构建场）、`recall_memory`（召回）、无其他。
+- **工具两件套** — `init_field`（构建场）、`recall_memory`（召回），无其他。`seed_memory` 和 `associate_memory` 已废除。
 
 ### 前端规约
 

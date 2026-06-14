@@ -866,9 +866,8 @@ function handleKey(e) {
 
 // ── Slash command popover ──
 var SLASH_COMMANDS = [
-  { name: '/seed',    alias: '/s',  desc: '进入记忆构建模式',   args: '[描述]' },
+  { name: '/init',    alias: '/i',  desc: '构建认知地形',     args: '[意图描述]' },
   { name: '/recall',  alias: '/r',  desc: '召回事件',          args: '<文本>' },
-  { name: '/associate', alias: '/a', desc: '概念关联',         args: '<文本>' },
   { name: '/status',  alias: '/st', desc: '当前库状态',        args: '' },
   { name: '/save',    alias: '',    desc: '持久化到磁盘',      args: '' },
   { name: '/load',    alias: '',    desc: '从磁盘读取',        args: '' },
@@ -1484,9 +1483,9 @@ async function send() {
   if (text.indexOf('/') === 0) {
     var parts = text.split(/\s+/);
     var cmdName = parts[0].slice(1).toLowerCase();
-    if (cmdName === 'seed' || cmdName === 's') { await handleSeedCommand(parts.slice(1)); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
+    if (cmdName === 'init' || cmdName === 'i') { await handleInitCommand(parts.slice(1)); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
     if (cmdName === 'recall' || cmdName === 'r') { await handleQueryCommand(parts.slice(1).join(' '), 'recall'); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
-    if (cmdName === 'associate' || cmdName === 'a') { await handleQueryCommand(parts.slice(1).join(' '), 'associate'); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
+
     if (cmdName === 'save') { await saveMem(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
     if (cmdName === 'load') { await loadMem(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
     if (cmdName === 'status' || cmdName === 'st') { await showStatusInline(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
@@ -1803,9 +1802,8 @@ function saveSettings() {
 
 // ── Chat detail tabs ──
 var SKILL_DEFS = [
-  { name: 'seed_memory', desc: '根据一组种子概念创建全新的记忆知识库。' },
+  { name: 'init_field', desc: '根据用户意图描述构建认知地形。' },
   { name: 'recall_memory', desc: '从记忆库中召回与查询文本相关的事件和锚点。' },
-  { name: 'associate_memory', desc: '从记忆库中查找与查询文本语义相关的概念锚点（轻量版）。' },
 ];
 
 function findLastMemoryCtx() {
@@ -1885,26 +1883,26 @@ function switchTab(name) {
   }
 }
 
-async function handleSeedCommand(args) {
+async function handleInitCommand(args) {
   var userDesc = args.length > 0 ? args.join(' ') : '';
-  var seedPrompt = '【记忆构建模式】你现在是记忆构建助手。请通过对话了解我的知识结构、经验偏好和核心原则，然后逐步调用 seed_memory tool 来构建记忆库。\n' +
+  var initPrompt = '【场初始化模式】你现在是认知地形构建助手。请通过对话了解用户的知识结构和意图，然后调用 init_field tool 来构建记忆场。\n' +
     '建议流程：\n' +
-    '1. 先通过提问了解我的背景\n' +
-    '2. 每次了解一批概念后调用一次 seed_memory\n' +
-    '3. 继续提问、继续注入，直到记忆库完整\n';
-  if (userDesc) seedPrompt += '\n初始信息：' + userDesc + '\n请在此基础上开始提问。';
+    '1. 先通过提问了解用户的背景和意图\n' +
+    '2. 每次了解一批概念后调用一次 init_field\n' +
+    '3. 继续提问、继续注入，直到记忆场完整\n';
+  if (userDesc) initPrompt += '\n初始意图：' + userDesc + '\n请在此基础上开始提问。';
 
   var s = getActiveSession();
   if (!s) return;
   var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  var userText = '/' + (args.length > 0 ? 'seed ' + userDesc : 'seed');
+  var userText = '/' + (args.length > 0 ? 'init ' + userDesc : 'init');
   // Persist user message + create assistant placeholder server-side before
   // opening the stream — same atomic pattern as send().
   apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: 'user', content: userText, time: time }),
-  }, 'seed: 记录用户消息');
+  }, 'init: 记录用户消息');
   s.messages.push({ role: 'user', content: userText, time: time });
   appendChatBubble('user', userText, time);
   updateSessionTitle(s);
@@ -1914,7 +1912,7 @@ async function handleSeedCommand(args) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: 'assistant', content: '', time: time2, memoryCtx: null }),
-  }, 'seed: 创建助手占位');
+  }, 'init: 创建助手占位');
   if (!placeholderResp.ok) {
     if (typeof addMessageToSession === 'function') addSystemNote('占位失败: ' + placeholderResp.error);
     return;
@@ -1927,7 +1925,7 @@ async function handleSeedCommand(args) {
   s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
 
   var baseUrl = resolveBackendUrl();
-  var apiMessages = [{ role: 'user', content: seedPrompt }];
+  var apiMessages = [{ role: 'user', content: initPrompt }];
   try {
     var resp = await fetch(baseUrl + '/v1/chat/completions', {
       method: 'POST',
@@ -1981,7 +1979,7 @@ fullText = '错误: ' + e.message;
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content: fullText, memoryCtx: memoryCtx, thinkingChain: thinkingChain.length ? thinkingChain : null }),
-  }, 'seed: 更新助手消息');
+  }, 'init: 更新助手消息');
   isStreaming = false; sendBtn.disabled = false; input.focus();
 }
 
@@ -2044,9 +2042,8 @@ async function showStatusInline() {
 
 function showHelp() {
   var h = '可用命令:\n' +
-    '  /seed [描述]              进入记忆构建模式（唤起 LLM）\n' +
+    '  /init [意图描述]            构建认知地形（别名: /i）\n' +
     '  /recall <文本>             召回事件（别名: /r）\n' +
-    '  /associate <文本>          概念关联（别名: /a）\n' +
     '  /status                   当前库状态（别名: /st）\n' +
     '  /save / /load             持久化到磁盘\n' +
     '  /help                     显示帮助\n\n' +

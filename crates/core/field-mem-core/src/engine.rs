@@ -5,6 +5,7 @@ use crate::embed::{EmbedProvider, DummyEmbedProvider};
 use crate::cycle::RelaxationCycle;
 use crate::recall::{value_init, associate, recall, consolidate_from_recall, RecallResult};
 use crate::init::init_anchors;
+use crate::init::init_from_concepts;
 use crate::paradigm::{detect_paradigm_shift, orthogonalize};
 use crate::ecg::{CognitiveEcg, EcgReport};
 use crate::persist;
@@ -98,8 +99,26 @@ impl DseEngine {
     // Init
     // ================================================================
 
-    /// Initialize anchors from concept descriptions.
-    /// (label, initial_density) pairs.
+    /// Initialize anchors from concept descriptions with fundamentality.
+    /// Each entry is (concept_label, fundamentality 0.0–1.0).
+    /// Fundamentality maps to density: `(f * 20).ceil()`, range 1–20.
+    /// Can be called multiple times — each call appends new anchors to the
+    /// existing field, enabling incremental field construction.
+    pub fn init_from_descriptions(&mut self, concepts: &[(String, f32)]) {
+        let anchors = init_from_concepts(self.embed.as_ref(), concepts);
+        let details: Vec<String> = anchors.iter().map(|a| {
+            let layer = anchor_layer(a.density);
+            format!("「{}」d={} s={:.2} dmp={:.2} {}", a.label, a.density, a.stiffness, a.damping, layer)
+        }).collect();
+        let count = anchors.len();
+        self.anchors.extend(anchors);
+        self.log_activity(ActivityKind::Init, format!("创建 {} 个锚点:\n  {}", count, details.join("\n  ")));
+    }
+
+    /// Legacy init: create anchors from (label, raw_density) pairs.
+    /// Prefer `init_from_descriptions` which uses fundamentality scoring.
+    #[deprecated(note = "use init_from_descriptions with fundamentality (0.0-1.0) instead")]
+    #[allow(deprecated)]
     pub fn init(&mut self, concepts: &[(&str, u32)]) {
         let anchors = init_anchors(self.embed.as_ref(), concepts);
         let details: Vec<String> = anchors.iter().map(|a| {
