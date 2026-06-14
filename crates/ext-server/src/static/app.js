@@ -1,6 +1,12 @@
 // ── State ──
+// `sessions` is a client-side cache of the server's source of truth.
+// Every mutation goes through a server endpoint immediately, then the local
+// cache is updated optimistically. The server's data is authoritative — a
+// refresh (e.g. on visibility change) pulls the latest from the server.
 var sessions = [];
-var activeSessionId = null;
+// active_session_id is per-device, persisted in localStorage so it survives
+// reload. The server also tracks it, but each device decides its own.
+var activeSessionId = localStorage.getItem('fm-active-id') || null;
 var isStreaming = false;
 var pollTimer = null;
 var currentLibrary = 'default';
@@ -57,159 +63,72 @@ async function apiCall(url, opts, label) {
     }
     return { ok: true, data: data };
   } catch(e) {
-    var nmsg = label + ': 网络错误 — ' + e.message;
+var nmsg = label + ': 网络错误 — ' + e.message;
     console.error('apiCall network error:', ctx, e);
     return { ok: false, error: nmsg, kind: 'network' };
   }
 }
 
-// ── Session persistence (server-side JSON file) ──
+// ── Inline SVG icon helpers ──
 //
-// Called on every mutation (createSession, switchSession, deleteSession,
-// addMessageToSession, sendMessage/seedMemory stream end). Fire-and-forget
-// by design — errors are logged but NEVER surfaced via addMessageToSession,
-// because that would re-enter the sync path and infinite-loop.
-async function syncSessionsToServer() {
-  var r = await apiCall('/api/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessions: sessions, active_id: activeSessionId }),
-  }, '同步会话');
-// Intentionally NOT calling addMessageToSession on error — that re-enters sync.
-  if (!r.ok) console.warn('syncSessionsToServer:', r.error);
-}
+// All chrome that would otherwise be text or a unicode glyph goes through
+// here so we can stay consistent (sizing, stroke weight, currentColor).
+// Each returns an HTML string for direct .innerHTML insertion.
+var ICON_CHEVRON = '<svg viewBox="0 0 8 8" fill="currentColor"><path d="M2 1 L6 4 L2 7 Z"/></svg>';
+var ICON_PENCIL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z"/><path d="M10 3 L13 6"/></svg>';
+var ICON_INFO = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7" x2="8" y2="11.5"/><circle cx="8" cy="4.7" r="0.6" fill="currentColor" stroke="none"/></svg>';
 
-// Debounced wrapper: collapse bursts (e.g. streaming end + render) into one POST.
-// Streaming end already calls the raw function (we want that one to be authoritative);
-// this debounced path handles quick-fire mutations from addMessageToSession.
-var _syncDebounceTimer = null;
-function syncSessionsDebounced() {
-  if (_syncDebounceTimer) return;
-  _syncDebounceTimer = setTimeout(function() {
-    _syncDebounceTimer = null;
-    syncSessionsToServer();
-  }, 400);
-}
+// ── Session persistence (server is source of truth) ──
+//
+// The server holds the canonical sessions list. The client keeps a cache in
+// `sessions` (initialized from the server on load) and pushes every mutation
+// through a dedicated endpoint immediately. After mutation the local cache is
+// updated optimistically, so the UI stays snappy.
+//
+// Why no more polling: every visible-state read pulls from the server, and
+// every write lands before returning. The only thing the client can't predict
+// is what *other devices* are doing — and we accept that "another device
+// changed something while you weren't looking" is fine to ignore for a
+// personal LAN tool. If you want to see other-device edits, hit the ↻ button.
 
-async function fetchSessionsFromServer() {
-  var r = await apiCall('/api/sessions', { method: 'GET' }, '加载会话');
+// Refresh the client cache from the server. Used at startup and on demand.
+async function refreshSessions() {
+  var r = await apiCall('/api/sessions', { method: 'GET' }, '刷新会话');
   if (!r.ok) {
-    if (typeof addMessageToSession === 'function') addMessageToSession('assistant', r.error);
-    return false;
+    console.warn('refreshSessions:', r.error);
+    return;
   }
-  var data = r.data;
-  if (data.ok && data.sessions && data.sessions.length) {
-    sessions = data.sessions;
-    activeSessionId = data.active_id || sessions[0].id;
-    return true;
-  }
-  return false;
-}
-
-// ── Cross-device session sync (polling + merge) ──
-//
-// We don't have WebSockets; instead the client polls the server every few seconds
-// and *merges* the response into local state with an "append-only" policy:
-//
-//   - New sessions on server → add to local.
-//   - Existing session with more messages on server → append the new tail.
-//   - Local-only sessions or local-only messages → preserved (in-flight typing is safe).
-//   - We never *truncate* local state from server data, so a stale read can't
-//     blow away the user's in-progress draft.
-//
-// Polling is a no-op when the document is hidden (saves battery on phone).
-var _sessionPollTimer = null;
-async function pollAndMergeSessions() {
-  var r = await apiCall('/api/sessions', { method: 'GET' }, '轮询会话');
-  if (!r.ok) return;
   var data = r.data;
   if (!data || !data.sessions) return;
-
-  // Build local id → session map
-  var localMap = {};
-  for (var i = 0; i < sessions.length; i++) {
-    localMap[sessions[i].id] = sessions[i];
+  sessions = data.sessions;
+  // active_session_id is per-device (localStorage). If the remembered id is
+  // gone (deleted on another device), fall back to the first session so the
+  // user lands somewhere instead of on an empty state.
+  if (activeSessionId && !sessions.find(function(s) { return s.id === activeSessionId; })) {
+    activeSessionId = sessions.length ? sessions[0].id : null;
+    if (activeSessionId) localStorage.setItem('fm-active-id', activeSessionId);
   }
-
-  var changed = false;
-  var newActive = null;
-
-  for (var i = 0; i < data.sessions.length; i++) {
-    var ss = data.sessions[i];
-    if (!ss || !ss.id) continue;
-    var local = localMap[ss.id];
-    var serverMsgs = ss.messages || [];
-
-    if (!local) {
-      // Brand new session from another device — add as-is
-      sessions.push({
-        id: ss.id,
-        title: ss.title || '新会话',
-        messages: serverMsgs.slice()
-      });
-      changed = true;
-    } else if (serverMsgs.length > local.messages.length) {
-      // Server has more messages → append the tail we haven't seen.
-      // Dedup by (role + content + time) to avoid double-append on race.
-      for (var j = local.messages.length; j < serverMsgs.length; j++) {
-        var m = serverMsgs[j];
-        if (!m) continue;
-        local.messages.push({
-          role: m.role || 'assistant',
-          content: m.content || '',
-          time: m.time || '',
-          memoryCtx: m.memoryCtx || null
-        });
-      }
-      if (ss.title && ss.title !== local.title) {
-        local.title = ss.title;
-      }
-      changed = true;
-    }
+  if (!activeSessionId && sessions.length) {
+    activeSessionId = sessions[0].id;
+    localStorage.setItem('fm-active-id', activeSessionId);
   }
-
-  // Don't change active_id automatically — that would disrupt the user mid-stream.
-  // Instead, if the server's active differs, just remember it (could be used for "active elsewhere" hint).
-  if (data.active_id && data.active_id !== activeSessionId && localMap[data.active_id]) {
-    newActive = data.active_id;  // currently unused, but available
-  }
-
-  if (changed) {
-    renderSessionList();
-    if (typeof getActiveSession === 'function' && getActiveSession()) renderMessages();
-  }
-  return newActive;
+  renderSessionList();
+  if (typeof getActiveSession === 'function' && getActiveSession()) renderMessages();
 }
 
-function startSessionPolling() {
-  if (_sessionPollTimer) return;
-  _sessionPollTimer = setInterval(function() {
-    if (document.hidden) return;  // skip when tab is hidden
-    pollAndMergeSessions();
-  }, 3000);
-}
 
-function stopSessionPolling() {
-  if (_sessionPollTimer) { clearInterval(_sessionPollTimer); _sessionPollTimer = null; }
-}
-
-// Manual trigger for the ↻ button — push local + pull remote in one shot.
+// Manual trigger for the ↻ button — pull the latest from the server.
 async function manualSessionSync() {
   var btn = document.querySelector('.sb-sync');
   if (btn) btn.classList.add('syncing');
-  // Push first (so server reflects local edits)
-  await syncSessionsToServer();
-  // Then pull and merge (so any other-device state arrives)
-  await pollAndMergeSessions();
+  await refreshSessions();
   if (btn) setTimeout(function() { btn.classList.remove('syncing'); }, 400);
 }
 
-// Pause when tab hidden, resume when visible — saves phone battery.
+// On returning to the foreground, immediately re-pull — covers the case
+// where another device or a long background freeze left the cache stale.
 document.addEventListener('visibilitychange', function() {
-  if (document.hidden) {
-    // On hide, do a final poll to catch up
-    pollAndMergeSessions();
-  }
+  if (!document.hidden) refreshSessions();
 });
 
 // ── Panel collapse state (persisted in sessionStorage) ──
@@ -224,30 +143,55 @@ function getActiveSession() {
   return sessions.find(function(s) { return s.id === activeSessionId; });
 }
 
-function createSession() {
-  var s = { id: Date.now().toString(), title: '新会话', messages: [] };
-  sessions.push(s);
-  activeSessionId = s.id;
+async function createSession() {
+  var r = await apiCall('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '新会话' }),
+  }, '创建会话');
+  if (!r.ok) {
+    if (typeof addMessageToSession === 'function') addSystemNote(r.error);
+    return;
+  }
+  // Server returns the new session; use it as authoritative.
+  sessions.push(r.data.session);
+  activeSessionId = r.data.session.id;
+  localStorage.setItem('fm-active-id', activeSessionId);
   renderSessionList();
   renderMessages();
-  syncSessionsToServer();
 }
 
-function switchSession(id) {
+async function switchSession(id) {
   activeSessionId = id;
+  localStorage.setItem('fm-active-id', id);
   renderSessionList();
   renderMessages();
-  syncSessionsToServer();
+  // Fire-and-forget the active marker; the local view is already correct.
+  apiCall('/api/sessions/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ active: true }),
+  }, '切换会话').then(function(r) {
+    if (!r.ok) console.warn('switchSession:', r.error);
+  });
 }
 
-function deleteSession(id) {
+async function deleteSession(id) {
+  // Optimistic local update first so the UI feels instant.
   sessions = sessions.filter(function(s) { return s.id !== id; });
   if (activeSessionId === id) {
     activeSessionId = sessions.length ? sessions[0].id : null;
+    if (activeSessionId) localStorage.setItem('fm-active-id', activeSessionId);
+    else localStorage.removeItem('fm-active-id');
   }
   renderSessionList();
   renderMessages();
-  syncSessionsToServer();
+  // Then tell the server.
+  apiCall('/api/sessions/' + encodeURIComponent(id), {
+    method: 'DELETE',
+  }, '删除会话').then(function(r) {
+    if (!r.ok) console.warn('deleteSession:', r.error);
+  });
 }
 
 function renderSessionList() {
@@ -278,7 +222,30 @@ function renderMessages() {
     var m = s.messages[i];
     var div = document.createElement('div');
     div.className = 'message ' + m.role;
+    // system_note reuses the same DOM shape as appendChatBubble produces
+    // (info icon + note-text span), so it stays visually consistent.
+    if (m.role === 'system_note') {
+      div.innerHTML = '<div class="content">' +
+        '<svg class="note-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="8" cy="8" r="6.5"/>' +
+          '<line x1="8" y1="7" x2="8" y2="11.5"/>' +
+          '<circle cx="8" cy="4.7" r="0.6" fill="currentColor" stroke="none"/>' +
+        '</svg>' +
+        '<span class="note-text">' + esc(m.content) + '</span>' +
+      '</div>';
+      el.appendChild(div);
+      continue;
+    }
+    var actionsHtml = '';
+    if (m.role === 'user') {
+      actionsHtml = '<div class="message-actions">' +
+        '<button class="message-action-btn" title="编辑并重新发送" onclick="beginEditMessage(this, ' + i + ')">' +
+          ICON_PENCIL +
+        '</button>' +
+      '</div>';
+    }
     div.innerHTML = '<div class="content">' + esc(m.content) + '</div>' +
+      actionsHtml +
       '<div class="meta">' + (m.role === 'user' ? '你' : 'FM') + ' &middot; ' + (m.time || '') + '</div>';
     if (m.role === 'assistant' && m.memoryCtx) {
       var toggle = document.createElement('div');
@@ -305,12 +272,419 @@ function renderMessages() {
       (function(t, d) {
         t.addEventListener('click', function() { t.classList.toggle('open'); d.classList.toggle('open'); });
       })(toggle, detail);
-      div.appendChild(toggle);
+div.appendChild(toggle);
       div.appendChild(detail);
+    }
+    if (m.role === 'assistant') {
+      var chain = m.thinkingChain;
+      // Fallback: if thinkingChain is missing but legacy reasoning/toolCalls exist,
+      // reconstruct from them (covers messages saved before this feature was added).
+      if ((!chain || chain.length === 0) && (m.reasoning || m.toolCalls)) {
+        chain = legacyToThinkingChain(m.reasoning, m.toolCalls);
+      }
+      renderThinkingChain(div, chain);
     }
     el.appendChild(div);
   }
-  el.scrollTop = el.scrollHeight;
+el.scrollTop = el.scrollHeight;
+}
+
+// ── Thinking chain (vertical timeline) ──
+//
+// Renders the reasoning / tool-call / output sequence as a compact vertical
+// timeline above the main content.  Each node is a small dot-and-label row;
+// click to expand the detail.  The chain is derived from the SSE stream order:
+// reasoning deltas accumulate into one "思考" node until a tool_call arrives,
+// which closes the current reasoning node and creates a "recall 调用" node.
+// After all intermediate steps, the main content is the "输出" node.
+//
+// The thinkingChain is stored as an array of {type, content} on the message
+// object.  type ∈ 'reasoning' | 'tool_call'.  The final "输出" node is implicit
+// (it's the main .content div) and is not stored in the chain.
+function renderThinkingChain(div, thinkingChain) {
+  if (!div) return;
+  // Remove any pre-existing chain we own (tagged via data-fm-chain).
+  var prev = div.querySelectorAll('[data-fm-chain]');
+  for (var p = 0; p < prev.length; p++) prev[p].remove();
+
+  if (!thinkingChain || !Array.isArray(thinkingChain) || thinkingChain.length === 0) return;
+
+  var chainWrap = document.createElement('div');
+  chainWrap.setAttribute('data-fm-chain', '1');
+  chainWrap.className = 'fm-thinking-chain';
+
+  for (var i = 0; i < thinkingChain.length; i++) {
+    var step = thinkingChain[i];
+    var isLast = (i === thinkingChain.length - 1);
+    var nodeEl = document.createElement('div');
+    nodeEl.className = 'chain-node';
+
+    var dotEl = document.createElement('div');
+    dotEl.className = 'chain-dot';
+    if (step.type === 'tool_call') dotEl.classList.add('dot-tool');
+    else dotEl.classList.add('dot-reasoning');
+
+    var labelEl = document.createElement('button');
+    labelEl.type = 'button';
+    labelEl.className = 'chain-label';
+    if (step.type === 'tool_call') {
+      var tcList = step.content;
+      var fnNames = [];
+      for (var k = 0; k < tcList.length; k++) {
+        fnNames.push((tcList[k].function && tcList[k].function.name) || '(unnamed)');
+      }
+      labelEl.innerHTML = ICON_CHEVRON + '<span>工具调用 · ' + fnNames.join(', ') + '</span>';
+    } else {
+      var rLen = (typeof step.content === 'string') ? step.content.length : 0;
+      labelEl.innerHTML = ICON_CHEVRON + '<span>思考 · ' + rLen + ' 字</span>';
+    }
+
+    var detailEl = document.createElement('div');
+    detailEl.className = 'chain-detail';
+    if (step.type === 'tool_call') {
+      detailEl.appendChild(renderToolCallsBody(step.content));
+    } else {
+      detailEl.textContent = step.content;
+    }
+
+    // Wire toggle
+    (function(lbl, det) {
+      lbl.addEventListener('click', function() {
+        lbl.classList.toggle('open');
+        det.classList.toggle('open');
+      });
+    })(labelEl, detailEl);
+
+    nodeEl.appendChild(dotEl);
+    nodeEl.appendChild(labelEl);
+    nodeEl.appendChild(detailEl);
+
+    // Connector line (not on last node)
+    if (!isLast) {
+      var connEl = document.createElement('div');
+      connEl.className = 'chain-connector';
+      nodeEl.appendChild(connEl);
+    }
+
+    chainWrap.appendChild(nodeEl);
+  }
+
+  // Insert chain before .content div
+  var contentEl = div.querySelector('.content');
+  if (contentEl) {
+    div.insertBefore(chainWrap, contentEl);
+  } else {
+    div.appendChild(chainWrap);
+  }
+}
+
+// Build a thinkingChain array from the SSE stream events.
+// Called incrementally during streaming and at stream end.
+// The chain captures the alternation: reasoning segments → tool calls → reasoning → …
+function buildThinkingChain(chain, reasoningDelta, newToolCalls) {
+  // If we got a reasoning delta, append to the last reasoning node
+  // or create a new one if the last node was a tool_call.
+  if (reasoningDelta) {
+    if (chain.length > 0 && chain[chain.length - 1].type === 'reasoning') {
+      chain[chain.length - 1].content += reasoningDelta;
+    } else {
+      chain.push({ type: 'reasoning', content: reasoningDelta });
+    }
+  }
+  // If we got new tool_calls, push a tool_call node.
+  if (newToolCalls && Array.isArray(newToolCalls) && newToolCalls.length) {
+    chain.push({ type: 'tool_call', content: newToolCalls });
+  }
+  return chain;
+}
+
+// Backwards compatibility: convert legacy (reasoning string, toolCalls array)
+// into a thinkingChain array.  If a tool_call appears between reasoning text,
+// we can't reconstruct the alternation precisely — the server interleaves them
+// in real-time, but the persisted form loses the interleaving order.  The best
+// we can do is: reasoning (one node) → tool_call (one node).
+function legacyToThinkingChain(reasoning, toolCalls) {
+  var chain = [];
+  if (reasoning && typeof reasoning === 'string' && reasoning.trim()) {
+    chain.push({ type: 'reasoning', content: reasoning });
+  }
+  if (toolCalls && Array.isArray(toolCalls) && toolCalls.length) {
+    chain.push({ type: 'tool_call', content: toolCalls });
+  }
+  return chain;
+}
+
+function makeCollapsePanel(label, bodyContent, extraClass) {
+  // bodyContent may be a string or an HTMLElement; the helper hides this.
+  var wrap = document.createElement('div');
+  wrap.setAttribute('data-fm-collapse', '1');
+  if (extraClass) wrap.className = extraClass;
+  var toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'collapse-toggle';
+  toggle.innerHTML = ICON_CHEVRON + '<span>' + esc(label) + '</span>';
+  var content = document.createElement('div');
+  content.className = 'collapse-content';
+  if (typeof bodyContent === 'string') {
+    content.textContent = bodyContent;
+  } else if (bodyContent) {
+    content.appendChild(bodyContent);
+  }
+  toggle.addEventListener('click', function() {
+    toggle.classList.toggle('open');
+    content.classList.toggle('open');
+  });
+  wrap.appendChild(toggle);
+  wrap.appendChild(content);
+  return wrap;
+}
+
+function renderToolCallsBody(toolCalls) {
+  var box = document.createElement('div');
+  for (var i = 0; i < toolCalls.length; i++) {
+    var tc = toolCalls[i] || {};
+    var item = document.createElement('div');
+    item.className = 'tool-call-item';
+    var name = document.createElement('div');
+    name.className = 'tool-call-name';
+    name.textContent = (tc.function && tc.function.name) || '(unnamed)';
+    item.appendChild(name);
+    if (tc.function && tc.function.arguments) {
+      var args = document.createElement('div');
+      args.className = 'tool-call-args';
+      // Try to pretty-print if arguments looks like JSON; otherwise show raw.
+      var raw = tc.function.arguments;
+      try { args.textContent = JSON.stringify(JSON.parse(raw), null, 2); }
+      catch (e2) { args.textContent = raw; }
+      item.appendChild(args);
+    }
+    box.appendChild(item);
+  }
+  return box;
+}
+
+// ── Edit-and-resend ──
+//
+// Inline editor for the most recent user message. Replaces the bubble with a
+// textarea + save/cancel buttons. On save: PATCH the message in place, DELETE
+// every message after it (so we don't carry stale assistant half into the
+// next stream), then re-run the streaming pipeline from that user turn.
+function beginEditMessage(btn, idx) {
+  var s = getActiveSession();
+  if (!s || !s.messages[idx] || s.messages[idx].role !== 'user') return;
+  if (isStreaming) {
+    addSystemNote('正在流式响应中，请等待结束后再编辑。');
+    return;
+  }
+  var div = btn.closest('.message');
+  if (!div) return;
+  var original = s.messages[idx].content;
+  // Build the edit form (textarea + two buttons), swap it in for the bubble.
+  var form = document.createElement('div');
+  form.className = 'edit-form';
+  var ta = document.createElement('textarea');
+  ta.value = original;
+  ta.rows = 3;
+  var actions = document.createElement('div');
+  actions.className = 'edit-form-actions';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.textContent = '取消';
+  cancelBtn.addEventListener('click', function() { cancelEdit(div); });
+  var saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'primary';
+  saveBtn.textContent = '保存并重新发送';
+  saveBtn.addEventListener('click', function() {
+    var newText = ta.value.trim();
+    if (!newText) return;
+    commitEdit(s, idx, newText);
+  });
+  // Enter to save, Esc to cancel — standard form ergonomics.
+  ta.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveBtn.click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelBtn.click(); }
+  });
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+  form.appendChild(ta);
+  form.appendChild(actions);
+  div.innerHTML = '';
+  div.appendChild(form);
+  ta.focus();
+  // Auto-size to content
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 240) + 'px';
+}
+
+function cancelEdit(div) {
+  // Re-render the active session to put the bubble back as it was.
+  renderMessages();
+}
+
+async function commitEdit(s, idx, newText) {
+  // 1. PATCH the message content in place.
+  var r1 = await apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + idx, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: newText }),
+  }, '编辑用户消息');
+  if (!r1.ok) {
+    addSystemNote('编辑失败: ' + r1.error);
+    return;
+  }
+  s.messages[idx].content = newText;
+  // 2. Truncate everything after the edited message — the assistant
+  //    half of the conversation is now stale relative to the new text.
+  //    Loop one DELETE at a time so each lands atomically.
+  while (s.messages.length > idx + 1) {
+    var r2 = await apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + (idx + 1), {
+      method: 'DELETE',
+    }, '截断后续消息');
+    if (!r2.ok) {
+      addSystemNote('截断失败: ' + r2.error);
+      return;
+    }
+    s.messages.splice(idx + 1, 1);
+  }
+  // 3. Re-render so the bubble reflects the new text and the stale
+  //    assistant messages are gone, then run the streaming pipeline from
+  //    the edited turn. We do NOT re-POST the user message — it's already
+  //    in the server's session, we just want a fresh assistant reply.
+  renderMessages();
+  await resendFromMessage(s, idx);
+}
+
+// Re-runs the streaming pipeline from a user message that already exists
+// in the session. Same shape as the post-placeholder tail of send(), but
+// without the POST-user-msg / create-placeholder steps.
+async function resendFromMessage(s, userIdx) {
+  isStreaming = true; sendBtn.disabled = true;
+  // Create a fresh assistant placeholder and capture its index.
+  var time2 = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  var placeholderResp = await apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'assistant', content: '', time: time2, memoryCtx: null }),
+  }, 'resend: 创建助手占位');
+  if (!placeholderResp.ok) {
+    addSystemNote('占位失败: ' + placeholderResp.error);
+    isStreaming = false; sendBtn.disabled = false; input.focus();
+    return;
+  }
+  var assistantIdx = placeholderResp.data.idx;
+  var assistantDiv = appendChatBubble('assistant', '...', time2);
+  assistantDiv.classList.add('typing');
+  var contentEl = assistantDiv.querySelector('.content');
+  contentEl.textContent = '...';
+  s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
+
+  var baseUrl = resolveBackendUrl();
+  var apiMessages = s.messages.filter(function(m) { return m.role === 'user' || m.role === 'assistant'; }).map(function(m) {
+    return { role: m.role, content: m.content };
+  });
+  var fullText = '', memoryCtx = null;
+  var thinkingChain = [];
+  var receivedContent = false;
+  try {
+    var resp = await fetch(baseUrl + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyInput.value },
+      body: JSON.stringify({
+        messages: apiMessages,
+        model: modelSelect.value,
+        stream: true,
+        reasoning_effort: (effortSelect.value || '').trim() || undefined,
+      }),
+    });
+    if (!resp.ok) {
+      var errBody = ''; try { errBody = await resp.text(); } catch(e2) {}
+      var errMsg = 'HTTP ' + resp.status;
+      try { var ej = JSON.parse(errBody); if (ej && (ej.error || ej.message)) errMsg += ' — ' + (ej.error || ej.message); }
+      catch(e2) { if (errBody && errBody.length < 200) errMsg += ' — ' + errBody; else if (resp.statusText) errMsg += ' ' + resp.statusText; }
+      throw new Error(errMsg);
+    }
+    var reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '';
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (line.indexOf('data: ') !== 0) continue;
+        var data = line.slice(6);
+        if (data === '[DONE]') break;
+        if (data.indexOf('__MEMORY__') === 0) {
+          try { memoryCtx = JSON.parse(data.slice(10)); } catch(e) {}
+          continue;
+        }
+        if (data.indexOf('__REASONING__') === 0) {
+          try {
+            var rp = JSON.parse(data.slice('__REASONING__'.length));
+            if (rp && typeof rp.delta === 'string') buildThinkingChain(thinkingChain, rp.delta, null);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
+        if (data.indexOf('__TOOL_CALLS__') === 0) {
+          try {
+            var tc = JSON.parse(data.slice('__TOOL_CALLS__'.length));
+            buildThinkingChain(thinkingChain, null, tc);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
+        if (!receivedContent) {
+          receivedContent = true;
+          assistantDiv.classList.remove('typing');
+        }
+        fullText += data;
+        contentEl.innerHTML = mdToHtml(fullText);
+        msgEl.scrollTop = msgEl.scrollHeight;
+      }
+    }
+    var lastAssistant = s.messages[s.messages.length - 1];
+    lastAssistant.content = fullText;
+    lastAssistant.memoryCtx = memoryCtx;
+    lastAssistant.thinkingChain = thinkingChain.length ? thinkingChain : null;
+    // Derive legacy reasoning/toolCalls from chain for server persistence.
+    var _lr = '', _ltc = null;
+    for (var _ci = 0; _ci < thinkingChain.length; _ci++) {
+      if (thinkingChain[_ci].type === 'reasoning') _lr += thinkingChain[_ci].content;
+      else if (thinkingChain[_ci].type === 'tool_call') _ltc = thinkingChain[_ci].content;
+    }
+    lastAssistant.reasoning = _lr || null;
+    lastAssistant.toolCalls = _ltc || null;
+    if (currentTab === 'memory' || currentTab === 'system') switchTab(currentTab);
+    contentEl.innerHTML = mdToHtml(fullText);
+    if (memoryCtx) renderMemoryCtx(assistantDiv, memoryCtx);
+    if (memoryCtx && memoryCtx.tool_invoked) fetchStatus();
+    renderThinkingChain(assistantDiv, thinkingChain);
+  } catch (e) {
+    assistantDiv.classList.remove('typing');
+    s.messages.pop();
+    assistantDiv.remove();
+    apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
+      method: 'DELETE',
+    }, 'resend: 回滚助手占位');
+    addSystemNote('错误: ' + e.message);
+    isStreaming = false; sendBtn.disabled = false; input.focus();
+    return;
+  }
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      content: fullText,
+      memoryCtx: memoryCtx,
+      reasoning: _lr || null,
+      toolCalls: _ltc || null,
+      thinkingChain: thinkingChain.length ? thinkingChain : null,
+    }),
+  }, 'resend: 更新助手消息');
+  isStreaming = false; sendBtn.disabled = false; input.focus();
 }
 
 function updateSessionTitle(s) {
@@ -353,7 +727,18 @@ function ensureMobileOverlay() {
     var bd = document.createElement('div');
     bd.className = 'panel-backdrop';
     document.body.appendChild(bd);
-    bd.addEventListener('click', function() {
+    bd.addEventListener('click', function(ev) {
+      // On mobile, native <select> dropdowns are rendered by the OS and
+      // extend beyond the panel.  A click on a dropdown option hits the
+      // backdrop first, which closes the panel and destroys the select.
+      // Guard: if a <select> inside a collapsible panel is currently
+      // focused (i.e. its dropdown is open), ignore this backdrop click.
+      var activeEl = document.activeElement;
+      if (activeEl && activeEl.tagName === 'SELECT' &&
+          activeEl.closest('.collapsible')) {
+        // Let the select handle the click; don't close panels.
+        return;
+      }
       // Close all open panels
       document.querySelectorAll('.collapsible').forEach(function(p) {
         p.classList.add('collapsed');
@@ -432,7 +817,7 @@ function initRailToggles() {
 }
 
 // ── Chat input & send ──
-var msgEl, input, sendBtn, modelSelect, apiKeyInput, urlInput;
+var msgEl, input, sendBtn, modelSelect, apiKeyInput, urlInput, reasoningSelect, effortSelect;
 var chatTabsEl, chatDetailEl, chatViewEl;
 var currentTab = 'conversation';
 
@@ -557,7 +942,7 @@ function fillLibrarySelect(selId, data) {
 async function loadLibraryList() {
   var r = await apiCall('/api/memory/libraries', { method: 'GET' }, '加载记忆库列表');
   if (!r.ok) {
-    if (typeof addMessageToSession === 'function') addMessageToSession('assistant', r.error);
+    if (typeof addMessageToSession === 'function') addSystemNote(r.error);
     return;
   }
   var data = r.data;
@@ -577,18 +962,18 @@ async function onLibraryChange(name) {
     body: JSON.stringify({ name: name }),
   }, '切换记忆库');
   if (!r.ok) {
-    addMessageToSession('assistant', r.error);
+    addSystemNote(r.error);
     return;
   }
   var data = r.data;
   if (data.ok) {
-    addMessageToSession('assistant', '已切换到记忆库: ' + data.name + ' (' + data.anchors_count + ' 锚点, ' + data.events_count + ' 事件)');
+    addSystemNote('已切换到记忆库: ' + data.name + ' (' + data.anchors_count + ' 锚点, ' + data.events_count + ' 事件)');
     currentLibrary = data.name;
     await loadLibraryList();
     fetchStatus();
   } else {
     // apiCall should have caught ok:false; fallback for unexpected shape
-    addMessageToSession('assistant', '切换失败: ' + (data.error || '未知错误'));
+    addSystemNote('切换失败: ' + (data.error || '未知错误'));
     loadLibraryList();
   }
 }
@@ -643,19 +1028,19 @@ async function createLibrary(name) {
     body: JSON.stringify({ name: name }),
   }, '新建记忆库');
   if (!r.ok) {
-    addMessageToSession('assistant', r.error);
+    addSystemNote(r.error);
     return;
   }
   var data = r.data;
   if (data.ok) {
     currentLibrary = data.name;
-    addMessageToSession('assistant', '已新建并切换到记忆库: ' + data.name);
+    addSystemNote('已新建并切换到记忆库: ' + data.name);
     await loadLibraryList();
     fetchStatus();
     var d = document.querySelector('.lib-dialog');
     if (d) d.remove();
   } else {
-    addMessageToSession('assistant', '新建失败: ' + (data.error || '未知错误'));
+    addSystemNote('新建失败: ' + (data.error || '未知错误'));
   }
 }
 
@@ -666,25 +1051,25 @@ async function saveAsLibrary(name) {
     body: JSON.stringify({ name: name }),
   }, '保存记忆库');
   if (!r.ok) {
-    addMessageToSession('assistant', r.error);
+    addSystemNote(r.error);
     return;
   }
   var data = r.data;
   if (data.ok) {
-    addMessageToSession('assistant', '已保存为记忆库: ' + data.name);
+    addSystemNote('已保存为记忆库: ' + data.name);
     await loadLibraryList();
     var d = document.querySelector('.lib-dialog');
     if (d) d.remove();
     showLibraryDialog();
   } else {
-    addMessageToSession('assistant', '保存失败: ' + (data.error || '未知错误'));
+    addSystemNote('保存失败: ' + (data.error || '未知错误'));
   }
 }
 
 async function renderLibListInDialog() {
   var r = await apiCall('/api/memory/libraries', { method: 'GET' }, '加载库列表（对话框）');
   if (!r.ok) {
-    if (typeof addMessageToSession === 'function') addMessageToSession('assistant', r.error);
+    if (typeof addMessageToSession === 'function') addSystemNote(r.error);
     return;
   }
   var data = r.data;
@@ -721,16 +1106,16 @@ async function deleteLibrary(name) {
     body: JSON.stringify({ name: name }),
   }, '删除记忆库');
   if (!r.ok) {
-    addMessageToSession('assistant', r.error);
+    addSystemNote(r.error);
     return;
   }
   var data = r.data;
   if (data.ok) {
-    addMessageToSession('assistant', '已删除记忆库: ' + name);
+    addSystemNote('已删除记忆库: ' + name);
     await loadLibraryList();
     showLibraryDialog();
   } else {
-    addMessageToSession('assistant', '删除失败: ' + (data.error || '未知错误'));
+    addSystemNote('删除失败: ' + (data.error || '未知错误'));
   }
 }
 
@@ -846,13 +1231,13 @@ async function fetchStatus() {
   var r = await apiCall('/api/memory/status', { method: 'GET' }, '拉取状态');
   if (!r.ok) {
     if (_statusOk && typeof addMessageToSession === 'function') {
-      addMessageToSession('assistant', r.error + ' (kind=' + r.kind + ')');
+      addSystemNote(r.error + ' (kind=' + r.kind + ')');
     }
     _statusOk = false;
     return;
   }
   if (!_statusOk) {
-    if (typeof addMessageToSession === 'function') addMessageToSession('assistant', '状态拉取已恢复。');
+    if (typeof addMessageToSession === 'function') addSystemNote('状态拉取已恢复。');
     _statusOk = true;
   }
   var data = r.data;
@@ -927,20 +1312,37 @@ function renderCorePanel(d) {
 }
 
 function renderMemPanel(d) {
-  var el = document.getElementById('panel-mem'), html = '';
-  html += '<h3>记忆库</h3>';
-  html += '<div class="lib-row">';
-  html += '<select id="mem-lib-sel" onchange="onLibraryChange(this.value)">';
-  html += '<option value="' + esc(currentLibrary) + '">' + esc(currentLibrary) + ' (active)</option>';
-  for (var li = 0; li < knownLibraries.length; li++) {
-    var kl = knownLibraries[li];
-    if (kl.name === currentLibrary) continue;
-    html += '<option value="' + esc(kl.name) + '">' + esc(kl.name) + ' (' + kl.anchors_count + '锚点)</option>';
+  var el = document.getElementById('panel-mem');
+  // ── Select area: only rebuild if missing (initial render or loadLibraryList) ──
+  // The 1.5s polling cycle must NOT destroy the <select>, or the user's dropdown
+  // snaps shut on every tick.  We use a marker div and only touch the select
+  // through fillLibrarySelect / loadLibraryList.
+  var libArea = el.querySelector('.mem-lib-area');
+  if (!libArea) {
+    // First render — inject the select area as a stable DOM island
+    var libDiv = document.createElement('div');
+    libDiv.className = 'mem-lib-area';
+    libDiv.innerHTML =
+      '<h3>记忆库</h3>' +
+      '<div class="lib-row">' +
+      '<select id="mem-lib-sel" onchange="onLibraryChange(this.value)"></select>' +
+      '<button onclick="showLibraryDialog()">管理</button>' +
+      '<button onclick="promptCreateLibrary()" style="margin-left:2px">+ 新建</button>' +
+      '</div>';
+    el.appendChild(libDiv);
+    // Populate the select from cached data
+    if (knownLibraries.length) {
+      fillLibrarySelect('mem-lib-sel', { libraries: knownLibraries, active: currentLibrary });
+    }
   }
-  html += '</select>';
-  html += '<button onclick="showLibraryDialog()">管理</button>';
-  html += '<button onclick="promptCreateLibrary()" style="margin-left:2px">+ 新建</button>';
-  html += '</div>';
+  // ── Data area: rebuild innerHTML for everything below the select ──
+  var dataArea = el.querySelector('.mem-data-area');
+  if (!dataArea) {
+    dataArea = document.createElement('div');
+    dataArea.className = 'mem-data-area';
+    el.appendChild(dataArea);
+  }
+  var html = '';
   html += '<div class="pm-row"><span class="l">锚点</span><span class="v">'+d.anchors_count+'</span></div>';
   html += '<div class="pm-row"><span class="l">事件</span><span class="v">'+d.events_count+'</span></div>';
   html += '<div class="pm-row"><span class="l">痕迹</span><span class="v">'+d.traces_count+'</span></div>';
@@ -970,7 +1372,7 @@ function renderMemPanel(d) {
       html += '<div class="pm-event"><div class="e-txt" title="'+esc(ev.text)+'">'+esc(ev.text)+'</div><div class="e-ts">'+ts+'</div></div>';
     }
   }
-  el.innerHTML = html;
+  dataArea.innerHTML = html;
   // Trigger field viz render
   renderFieldViz(d.anchors || [], d.ecg ? d.ecg.field_tension : 0);
 }
@@ -1062,23 +1464,46 @@ async function send() {
     if (cmdName === 'load') { await loadMem(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
     if (cmdName === 'status' || cmdName === 'st') { await showStatusInline(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
     if (cmdName === 'help' || cmdName === 'h' || cmdName === '?') { showHelp(); isStreaming = false; sendBtn.disabled = false; input.focus(); return; }
-    addMessageToSession('assistant', '未知命令: ' + parts[0] + '。输入 /help 查看命令。');
+addSystemNote('未知命令: ' + parts[0] + '。输入 /help 查看命令。');
+    isStreaming = false; sendBtn.disabled = false; input.focus();
+return;
+}
+
+  var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+
+  // Step 1: persist the user message immediately. We don't await — the user's
+  // typing flow shouldn't block on the round-trip, and a network hiccup will
+  // surface as a console warning rather than a stuck spinner.
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'user', content: text, time: time }),
+  }, '记录用户消息');
+s.messages.push({ role: 'user', content: text, time: time });
+  updateSessionTitle(s);
+  // Pass msgIdx so the bubble renders an edit button on hover.
+  appendChatBubble('user', text, time, s.messages.length - 1);
+
+  // Step 2: create the assistant placeholder server-side and capture its index.
+  // We MUST await here — without the idx the streaming-finish PATCH has nowhere
+  // to land. If this fails, we abort the send and tell the user.
+  var time2 = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  var placeholderResp = await apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'assistant', content: '', time: time2, memoryCtx: null }),
+  }, '创建助手占位');
+  if (!placeholderResp.ok) {
+if (typeof addSystemNote === 'function') addSystemNote('占位失败: ' + placeholderResp.error);
     isStreaming = false; sendBtn.disabled = false; input.focus();
     return;
   }
-
-  var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  s.messages.push({ role: 'user', content: text, time: time });
-  updateSessionTitle(s);
-  syncSessionsToServer();
-  appendChatBubble('user', text, time);
-
-  var time2 = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
+  var assistantIdx = placeholderResp.data.idx;
   var assistantDiv = appendChatBubble('assistant', '...', time2);
   assistantDiv.classList.add('typing');
   var contentEl = assistantDiv.querySelector('.content');
   contentEl.textContent = '...';
+  s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
 
   var baseUrl = resolveBackendUrl();
   var apiMessages = s.messages.filter(function(m) { return m.role === 'user' || m.role === 'assistant'; }).map(function(m) {
@@ -1088,7 +1513,12 @@ async function send() {
     var resp = await fetch(baseUrl + '/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyInput.value },
-      body: JSON.stringify({ messages: apiMessages, model: modelSelect.value, stream: true }),
+body: JSON.stringify({
+        messages: apiMessages,
+        model: modelSelect.value,
+        stream: true,
+        reasoning_effort: (effortSelect.value || '').trim() || undefined,
+      }),
     });
     if (!resp.ok) {
       // Try to read error body for richer message; fall back to status text
@@ -1099,7 +1529,10 @@ async function send() {
       catch(e2) { if (errBody && errBody.length < 200) errMsg += ' — ' + errBody; else if (resp.statusText) errMsg += ' ' + resp.statusText; }
       throw new Error(errMsg);
     }
-    var fullText = '', memoryCtx = null, reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '', receivedContent = false;
+var fullText = '', memoryCtx = null, reader = resp.body.getReader(), decoder = new TextDecoder(), buffer = '', receivedContent = false;
+    // thinkingChain captures the alternation of reasoning ↔ tool_call steps
+    // in their original order.  We accumulate it incrementally from SSE deltas.
+    var thinkingChain = [];
     while (true) {
       var result = await reader.read();
       if (result.done) break;
@@ -1115,6 +1548,22 @@ async function send() {
           try { memoryCtx = JSON.parse(data.slice(10)); } catch(e) {}
           continue;
         }
+        if (data.indexOf('__REASONING__') === 0) {
+          try {
+            var rp = JSON.parse(data.slice('__REASONING__'.length));
+            if (rp && typeof rp.delta === 'string') buildThinkingChain(thinkingChain, rp.delta, null);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
+        if (data.indexOf('__TOOL_CALLS__') === 0) {
+          try {
+            var tc = JSON.parse(data.slice('__TOOL_CALLS__'.length));
+            buildThinkingChain(thinkingChain, null, tc);
+          } catch(e) {}
+          renderThinkingChain(assistantDiv, thinkingChain);
+          continue;
+        }
         if (!receivedContent) {
           receivedContent = true;
           assistantDiv.classList.remove('typing');
@@ -1124,29 +1573,92 @@ async function send() {
         msgEl.scrollTop = msgEl.scrollHeight;
       }
     }
-    var lastAssistant = s.messages[s.messages.length - 1];
+var lastAssistant = s.messages[s.messages.length - 1];
     lastAssistant.content = fullText;
     lastAssistant.memoryCtx = memoryCtx;
+    // Persist thinkingChain so they survive session switches and refresh.
+    // Also derive legacy reasoning/toolCalls for backwards compatibility
+    // with the server's persisted message format.
+    lastAssistant.thinkingChain = thinkingChain.length ? thinkingChain : null;
+    var lastReasoning = '';
+    var lastToolCalls = null;
+    for (var ci = 0; ci < thinkingChain.length; ci++) {
+      if (thinkingChain[ci].type === 'reasoning') lastReasoning += thinkingChain[ci].content;
+      else if (thinkingChain[ci].type === 'tool_call') lastToolCalls = thinkingChain[ci].content;
+    }
+    lastAssistant.reasoning = lastReasoning || null;
+    lastAssistant.toolCalls = lastToolCalls || null;
     if (currentTab === 'memory' || currentTab === 'system') switchTab(currentTab);
     contentEl.innerHTML = mdToHtml(fullText);
     if (memoryCtx) renderMemoryCtx(assistantDiv, memoryCtx);
     if (memoryCtx && memoryCtx.tool_invoked) fetchStatus();
-  } catch (e) {
+    // Final chain render so the timeline reflects the complete steps.
+    renderThinkingChain(assistantDiv, thinkingChain);
+} catch (e) {
+    // Roll back the placeholder we created at the start of send() so the
+    // assistant message never carries an "错误: ..." line that would leak
+    // into subsequent LLM history. Surface the failure as a system note.
     assistantDiv.classList.remove('typing');
-    contentEl.innerHTML = '<span style="color:#c33">错误: ' + esc(e.message) + '</span>';
-    var lastAssistant2 = s.messages[s.messages.length - 1];
-    lastAssistant2.content = '错误: ' + e.message;
+    s.messages.pop();
+    assistantDiv.remove();
+    apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
+      method: 'DELETE',
+    }, '回滚助手占位');
+    addSystemNote('错误: ' + e.message);
+    isStreaming = false; sendBtn.disabled = false; input.focus();
+    return;
   }
-  // Stream finished — push final state to server so phone/other devices see the reply.
-  syncSessionsToServer();
+  // Step 4: persist the final assistant content + memoryCtx via PATCH on the
+  // placeholder. Fire-and-forget — the local view is already correct, so a
+  // failure here only loses the cross-device view of THIS message, not the
+  // conversation history.
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+      content: fullText,
+      memoryCtx: memoryCtx,
+      reasoning: lastReasoning || null,
+      toolCalls: lastToolCalls || null,
+      thinkingChain: thinkingChain.length ? thinkingChain : null,
+    }),
+  }, '更新助手消息');
   isStreaming = false; sendBtn.disabled = false; input.focus();
 }
 
-function appendChatBubble(role, content, time) {
+function appendChatBubble(role, content, time, msgIdx) {
   var div = document.createElement('div');
   div.className = 'message ' + role;
+  // system_note: a one-shot UI hint (command response / error). Rendered as
+  // an inline note with an info icon — distinct from real assistant replies
+  // so the user can tell at a glance what's LLM-generated and what's the
+  // console talking back. Also filtered out of LLM history in send().
+  if (role === 'system_note') {
+    div.innerHTML = '<div class="content">' +
+      '<svg class="note-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="8" cy="8" r="6.5"/>' +
+        '<line x1="8" y1="7" x2="8" y2="11.5"/>' +
+        '<circle cx="8" cy="4.7" r="0.6" fill="currentColor" stroke="none"/>' +
+      '</svg>' +
+      '<span class="note-text">' + esc(content) + '</span>' +
+    '</div>';
+    msgEl.appendChild(div);
+    msgEl.scrollTop = msgEl.scrollHeight;
+    return div;
+  }
   var label = role === 'user' ? '你' : 'FM';
+  var actionsHtml = '';
+  // Edit button only for user messages. idx is the message index in the
+  // session — used by editAndResend() to PATCH + truncate + re-stream.
+  if (role === 'user' && typeof msgIdx === 'number') {
+    actionsHtml = '<div class="message-actions">' +
+      '<button class="message-action-btn" title="编辑并重新发送" onclick="beginEditMessage(this, ' + msgIdx + ')">' +
+        ICON_PENCIL +
+      '</button>' +
+    '</div>';
+  }
   div.innerHTML = '<div class="content">' + esc(content) + '</div>' +
+    actionsHtml +
     '<div class="meta">' + label + ' &middot; ' + (time || new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})) + '</div>';
   msgEl.appendChild(div);
   msgEl.scrollTop = msgEl.scrollHeight;
@@ -1157,13 +1669,38 @@ function addMessageToSession(role, content) {
   var s = getActiveSession();
   if (!s) return;
   var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  // Optimistic local update.
   s.messages.push({ role: role, content: content, time: time });
   appendChatBubble(role, content, time);
   updateSessionTitle(s);
-  // Sync to server so other devices see this message.
-  // Debounced because addMessageToSession is called for every status message
-  // (switch library / save / load results), and we don't want a POST per message.
-  syncSessionsDebounced();
+  // Persist immediately — every mutation lands server-side before this returns.
+apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: role, content: content, time: time }),
+  }, '追加消息').then(function(r) {
+    if (!r.ok) console.warn('addMessageToSession:', r.error);
+  });
+}
+
+// One-shot UI note — kept in the messages stream (so refresh / re-render
+// preserves it) but tagged 'system_note' so send() filters it out of the
+// LLM history. Use this for command responses, validation hints, errors —
+// anything the model shouldn't see as prior context.
+function addSystemNote(content) {
+  var s = getActiveSession();
+  if (!s) return;
+  var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  s.messages.push({ role: 'system_note', content: content, time: time });
+  appendChatBubble('system_note', content, time);
+  // No updateSessionTitle() call — system notes shouldn't influence the title.
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'system_note', content: content, time: time }),
+  }, '追加系统提示').then(function(r) {
+    if (!r.ok) console.warn('addSystemNote:', r.error);
+  });
 }
 
 // ── Settings modal ──
@@ -1175,6 +1712,10 @@ var DEFAULT_CONFIG = {
   backendUrl: '',
   model: 'test-model-1',
   apiKey: 'sk-fm',
+  // Reasoning effort: low | medium | high | xhigh. Passed through to the
+  // upstream LLM verbatim; if a model doesn't understand it, the field is
+  // omitted server-side and nothing breaks.
+  reasoningEffort: 'medium',
 };
 
 // Resolve the LLM backend URL.
@@ -1214,6 +1755,7 @@ function saveConfigToDisk() {
       backendUrl: urlInput.value.trim(),
       model: modelSelect.value.trim(),
       apiKey: apiKeyInput.value,
+      reasoningEffort: effortSelect.value,
     };
     localStorage.setItem(CONFIG_KEY, JSON.stringify(c));
   } catch(e) {}
@@ -1328,16 +1870,34 @@ async function handleSeedCommand(args) {
   var s = getActiveSession();
   if (!s) return;
   var time = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  s.messages.push({ role: 'user', content: '/' + (args.length > 0 ? 'seed ' + userDesc : 'seed'), time: time });
-  appendChatBubble('user', '/' + (args.length > 0 ? 'seed ' + userDesc : 'seed'), time);
+  var userText = '/' + (args.length > 0 ? 'seed ' + userDesc : 'seed');
+  // Persist user message + create assistant placeholder server-side before
+  // opening the stream — same atomic pattern as send().
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'user', content: userText, time: time }),
+  }, 'seed: 记录用户消息');
+  s.messages.push({ role: 'user', content: userText, time: time });
+  appendChatBubble('user', userText, time);
   updateSessionTitle(s);
 
   var time2 = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-  s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
+  var placeholderResp = await apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'assistant', content: '', time: time2, memoryCtx: null }),
+  }, 'seed: 创建助手占位');
+  if (!placeholderResp.ok) {
+    if (typeof addMessageToSession === 'function') addSystemNote('占位失败: ' + placeholderResp.error);
+    return;
+  }
+  var assistantIdx = placeholderResp.data.idx;
   var assistantDiv = appendChatBubble('assistant', '...', time2);
   assistantDiv.classList.add('typing');
   var contentEl = assistantDiv.querySelector('.content');
   contentEl.textContent = '...';
+  s.messages.push({ role: 'assistant', content: '', time: time2, memoryCtx: null });
 
   var baseUrl = resolveBackendUrl();
   var apiMessages = [{ role: 'user', content: seedPrompt }];
@@ -1383,17 +1943,23 @@ async function handleSeedCommand(args) {
   } catch (e) {
     assistantDiv.classList.remove('typing');
     contentEl.innerHTML = '<span style="color:#c33">错误: ' + esc(e.message) + '</span>';
+fullText = '错误: ' + e.message;
     var lastAssistant2 = s.messages[s.messages.length - 1];
-    lastAssistant2.content = '错误: ' + e.message;
+    lastAssistant2.content = fullText;
+    lastAssistant2.memoryCtx = null;
   }
-  // Stream finished — push final state to server so phone/other devices see the reply.
-  syncSessionsToServer();
+  // PATCH the placeholder with the final streamed content (fire-and-forget).
+  apiCall('/api/sessions/' + encodeURIComponent(s.id) + '/messages/' + assistantIdx, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: fullText, memoryCtx: memoryCtx }),
+  }, 'seed: 更新助手消息');
   isStreaming = false; sendBtn.disabled = false; input.focus();
 }
 
 async function handleQueryCommand(query, mode) {
   if (!query) {
-    addMessageToSession('assistant', '用法: /' + mode + ' <查询文本>');
+    addSystemNote('用法: /' + mode + ' <查询文本>');
     return;
   }
   var msg = appendChatBubble('assistant', '正在查询...', new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
@@ -1433,7 +1999,7 @@ async function handleQueryCommand(query, mode) {
 
 async function showStatusInline() {
   var r = await apiCall('/api/memory/status', { method: 'GET' }, '获取状态');
-  if (!r.ok) { addMessageToSession('assistant', r.error); return; }
+  if (!r.ok) { addSystemNote(r.error); return; }
   var data = r.data;
     var anchors = data.anchors || [];
     var lines = [];
@@ -1445,7 +2011,7 @@ async function showStatusInline() {
     for (var i = 0; i < Math.min(anchors.length, 8); i++) {
       lines.push('  ' + anchors[i].label + ' (d=' + anchors[i].density + ')');
     }
-    addMessageToSession('assistant', lines.join('\n'));
+    addSystemNote(lines.join('\n'));
 }
 
 function showHelp() {
@@ -1457,29 +2023,29 @@ function showHelp() {
     '  /save / /load             持久化到磁盘\n' +
     '  /help                     显示帮助\n\n' +
     '记忆库管理: 点 header 的"管理"按钮';
-  addMessageToSession('assistant', h);
+  addSystemNote(h);
 }
 
 async function saveMem() {
   var r = await apiCall('/api/memory/save', { method: 'POST' }, '保存记忆');
-  if (!r.ok) { addMessageToSession('assistant', r.error); fetchStatus(); return; }
+  if (!r.ok) { addSystemNote(r.error); fetchStatus(); return; }
   var data = r.data;
   if (data.ok) {
-    addMessageToSession('assistant', '记忆已保存到磁盘。');
+    addSystemNote('记忆已保存到磁盘。');
   } else {
-    addMessageToSession('assistant', '保存失败: ' + (data.error || '未知错误'));
+    addSystemNote('保存失败: ' + (data.error || '未知错误'));
   }
   fetchStatus();
 }
 
 async function loadMem() {
   var r = await apiCall('/api/memory/load', { method: 'POST' }, '读取记忆');
-  if (!r.ok) { addMessageToSession('assistant', r.error); fetchStatus(); return; }
+  if (!r.ok) { addSystemNote(r.error); fetchStatus(); return; }
   var data = r.data;
   if (data.ok) {
-    addMessageToSession('assistant', '已读取 ' + data.anchors_count + ' 锚点、' + data.events_count + ' 事件。');
+    addSystemNote('已读取 ' + data.anchors_count + ' 锚点、' + data.events_count + ' 事件。');
   } else {
-    addMessageToSession('assistant', '读取失败: ' + (data.error || '未知错误'));
+    addSystemNote('读取失败: ' + (data.error || '未知错误'));
   }
   fetchStatus();
 }
@@ -1488,13 +2054,13 @@ async function loadMem() {
 window.addEventListener('error', function(e) {
   console.error('Global error:', e.message, e.filename, e.lineno);
   if (msgEl) {
-    addMessageToSession('assistant', '运行时错误: ' + e.message + ' (line ' + e.lineno + ')');
+    addSystemNote('运行时错误: ' + e.message + ' (line ' + e.lineno + ')');
   }
 });
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
   if (msgEl) {
-    addMessageToSession('assistant', '异步错误: ' + (e.reason && e.reason.message || e.reason || '未知错误'));
+    addSystemNote('异步错误: ' + (e.reason && e.reason.message || e.reason || '未知错误'));
   }
 });
 
@@ -1505,16 +2071,29 @@ document.addEventListener('DOMContentLoaded', function() {
   sendBtn = document.getElementById('send-btn');
   modelSelect = document.getElementById('settings-model');
   apiKeyInput = document.getElementById('settings-api-key');
-  urlInput = document.getElementById('settings-backend-url');
+urlInput = document.getElementById('settings-backend-url');
+  reasoningSelect = document.getElementById('settings-reasoning-effort');
+  effortSelect = document.getElementById('effort-select');
   chatTabsEl = document.getElementById('chat-tabs');
   chatDetailEl = document.getElementById('chat-detail');
   chatViewEl = document.getElementById('chat-view');
 
   // Load saved config
   var cfg = loadConfig();
-  urlInput.value = cfg.backendUrl;
+urlInput.value = cfg.backendUrl;
   modelSelect.value = cfg.model;
   apiKeyInput.value = cfg.apiKey;
+  reasoningSelect.value = cfg.reasoningEffort || 'medium';
+  effortSelect.value = cfg.reasoningEffort || 'medium';
+  // Sync the two reasoning effort selects — changing one updates the other.
+  reasoningSelect.addEventListener('change', function() {
+    effortSelect.value = reasoningSelect.value;
+    saveConfigToDisk();
+  });
+  effortSelect.addEventListener('change', function() {
+    reasoningSelect.value = effortSelect.value;
+    saveConfigToDisk();
+  });
 
   input.addEventListener('keydown', handleKey);
   input.addEventListener('input', onInputChange);
@@ -1526,11 +2105,14 @@ document.addEventListener('DOMContentLoaded', function() {
     switchTab(btn.getAttribute('data-tab'));
   });
 
-  initRailToggles();
-  fetchSessionsFromServer().then(function(loaded) {
-    if (!loaded) createSession();
+initRailToggles();
+  // Refresh from server on load. If no sessions exist yet (fresh install),
+  // create one so the UI isn't empty.
+  refreshSessions().then(function() {
+    if (sessions.length === 0) createSession();
   });
   loadLibraryList();
   startPolling();
-  startSessionPolling();
+  // No more session polling — visibilitychange triggers refreshSessions() on
+  // foreground return, which is enough for a single-user LAN tool.
 });

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f4f0">
   <title>field-memory 控制台</title>
-  <link rel="stylesheet" href="style.css?v=20260614">
+<link rel="stylesheet" href="style.css?v=20260614c">
 </head>
 <body>
 
@@ -72,6 +72,12 @@
     </div>
     <div class="chat-detail" id="chat-detail" hidden></div>
     <div id="input-area">
+      <select id="effort-select" title="思考强度" onchange="saveConfigToDisk()">
+        <option value="low">低</option>
+        <option value="medium" selected>中</option>
+        <option value="high">高</option>
+        <option value="xhigh">极高</option>
+      </select>
       <textarea id="user-input" rows="1" placeholder="输入消息，/ 查看命令…"></textarea>
       <button id="send-btn" onclick="send()">↑</button>
       <div class="cmd-popover" id="cmd-popover"></div>
@@ -83,7 +89,7 @@
 
 </div>
 
-<script src="app.js?v=20260614"></script>
+<script src="app.js?v=20260614c"></script>
 
 <div id="settings-modal" class="modal" hidden>
   <div class="modal-backdrop" onclick="closeSettings()"></div>
@@ -103,10 +109,20 @@
         <input id="settings-model" type="text" placeholder="test-model-1">
         <span class="form-hint">透传给后端 LLM 的 model 字段</span>
       </div>
-      <div class="form-row">
+<div class="form-row">
         <label for="settings-api-key">API Key</label>
         <input id="settings-api-key" type="password" placeholder="sk-fm">
         <span class="form-hint">ext-server 用此 key 调上游 LLM</span>
+      </div>
+      <div class="form-row">
+        <label for="settings-reasoning-effort">思考强度</label>
+        <select id="settings-reasoning-effort">
+          <option value="low">低</option>
+          <option value="medium" selected>中</option>
+          <option value="high">高</option>
+          <option value="xhigh">极高</option>
+        </select>
+        <span class="form-hint">透传给上游 reasoning_effort；不支持的模型会被忽略</span>
       </div>
     </div>
     <div class="modal-footer">
