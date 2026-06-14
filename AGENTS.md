@@ -149,7 +149,7 @@ field-memory/
 7. **折叠面板的 toggle 按钮不能放在面板内部** — `overflow:hidden` + `width:0` 会把按钮也隐藏掉，用户无法展开回来。按钮应放在容器中 absolute 定位，或用 JS 动态计算位置。
 8. **JS state 与 HTML toggle class 必须一致** — `state.showLabels = false` 但 HTML 写 `class="toggle on"` 是已有 bug，拆分时必须对齐。
 
-9. **回忆加强回忆是自洽行为，不需要阻止** — 召回在场中广播方向向量产生 ImpactTrace，密度增加是场的自然响应。真正需要防的是：系统管道内容（system prompt 注入的 recall 文本、tool call JSON 结果）被当作事件录入，以及 LLM 通过 seed_memory 将已存在的锚点当作新概念重复注入。防护层级：核心引擎用 `EventSource` 标记来源（信息性），服务端 seed_memory 做锚点去重，system prompt 加强防回写提示。
+9. **回忆加强回忆是自洽行为，不需要阻止** — 召回在场中广播方向向量产生 ImpactTrace，密度增加是场的自然响应。真正需要防的是：系统管道内容（system prompt 注入的 recall 文本、tool call JSON 结果）被当作事件录入，以及 LLM 通过 init_field 将已存在的锚点当作新概念重复注入。防护层级：核心引擎用 `EventSource` 标记来源（信息性），服务端 init_field 做锚点去重，system prompt 加强防回写提示。
 10. **bincode 不支持 `#[serde(default)]` 的缺字段反序列化** — bincode 是非自描述格式，旧数据缺少新字段会直接报错。persist 的 load 函数必须做版本容错：先尝试新格式，失败后 fallback 到 LegacyEvent 手动 backfill。
 
 11. **会话真理源必须在服务端，不在浏览器** — 之前的设计是前端 `var sessions = []` 作为真理源，每次 mutation fire-and-forget POST 整个数组。这导致 5 个相互叠加的脆弱点：(a) tab 切换/关闭/冻结都丢 (b) 流式最后一笔 fire-and-forget 容易丢 (c) 多设备"最后写入赢"互相覆盖 (d) JSON 文件半截写损坏 (e) visibility 变化不强制 refresh。修复方式是服务端 hold `Arc<Mutex<SessionsData>>` + atomic write（tmp + fsync + rename），所有 mutation 走细粒度 endpoint（POST/PATCH/DELETE），流式输出原子化为 4 步：user msg 立即 POST → assistant 占位 await POST 拿 idx → 流过程不发请求 → 流结束 PATCH 占位。**只要连上服务端，会话永不丢失。**

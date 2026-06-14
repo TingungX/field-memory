@@ -30,16 +30,16 @@ init 可以多次调用。每次追加 40-60 个锚点到已有场上。新锚�
 
 ### Phase 0: 核心引擎（零风险）
 
-- [ ] **`init.rs`** — 新增 `init_from_concepts(embed, concepts)` 接收 `Vec<(String, f32)>`（label + fundamentality），代替旧的 `&[(&str, u32)]`
+- [x] **`init.rs`** — 新增 `init_from_concepts(embed, concepts)` 接收 `Vec<(String, f32)>`（label + fundamentality），代替旧的 `&[(&str, u32)]`
   - fundamentality (0.0-1.0) → density 映射：`density = (fundamentality * 20.0).ceil() as u32`，范围 1-20
   - 旧 `init_anchors` 保留为内部兼容函数，标记 `#[deprecated]`
-- [ ] **`engine.rs`** — 新增 `DseEngine::init_from_descriptions(&mut self, descriptions: &[(String, f32)])` 
+- [x] **`engine.rs`** — 新增 `DseEngine::init_from_descriptions(&mut self, descriptions: &[(String, f32)])` 
   - 旧 `init()` 保留但标记 `#[deprecated]`
-- [ ] **测试** — `init.rs` 新增测试：高 fundamentality → 高 density，低 → 低
+- [x] **测试** — `init.rs` 新增测试：高 fundamentality → 高 density，低 → 低
 
 ### Phase 1: LLM 概念提取（低风险）
 
-- [ ] **`ext-server/llm.rs`** — 新增 `extract_concepts(backend_url, model, user_intent) -> Vec<(String, f32)>` 
+- [x] **`ext-server/llm.rs`** — 新增 `extract_concepts(backend_url, model, user_intent) -> Vec<(String, f32)>` 
   - 调用 LLM，prompt 要求从用户意图描述中提取 40-60 个核心概念
   - 输出格式：JSON array of `{"concept": "...", "fundamentality": 0.0-1.0}`
   - Prompt 要点：
@@ -48,35 +48,36 @@ init 可以多次调用。每次追加 40-60 个锚点到已有场上。新锚�
     - fundamentality 越高表示该概念越核心、越不可绕过
     - 概念之间应该有足够的语义差异（不要列出近义词）
     - 不要包含用户偏好本身（如"喜欢Rust"），而是偏好背后的维度（如"类型安全直觉"）
-- [ ] **`ext-server/tools.rs`** — 重写 `seed_memory` 为 `init_field`
+- [x] **`ext-server/tools.rs`** — 重写 `seed_memory` 为 `init_field`
   - 工具名：`init_field`
   - 输入：`intent`（用户意图描述文本，如"我希望你是一个注重长期方案的系统程序员"）
   - 流程：`extract_concepts(intent)` → `engine.init_from_descriptions(concepts)` → relax
   - 保留锚点去重逻辑（已有标签的跳过）
   - 输出：新创建的锚点数、跳过的重复数、当前场总览
-- [ ] **`ext-server/tools.rs`** — 移除 `seed_memory` 和 `associate_memory` 工具
+- [x] **`ext-server/tools.rs`** — 移除 `seed_memory` 和 `associate_memory` 工具
   - `seed_memory` → 由 `init_field` 替代
   - `associate_memory` → 功能被 `recall_memory` 覆盖，且语义不清
-- [ ] **测试** — 手动测试：输入"我希望你是注重长期方案的系统程序员"，验证概念提取和场构建
+- [x] **测试** — 手动测试：输入"我希望你是注重长期方案的系统程序员"，验证概念提取和场构建
 
 ### Phase 2: 接口统一（低风险）
 
-- [ ] **`ext-server/routes.rs`** — `/seed` API 重命名为 `/init`
-  - 请求体从 `{concepts: [...], events_per_anchor, relax_cycles}` 改为 `{intent: "..."}` 
+- [x] **`ext-server/routes.rs`** — `/seed` API 重命名为 `/init`
+  - 请求体从 `{concepts: [...], events_per_anchor, relax_cycles}` 改为 `{intent: "..."}`
   - 旧 `/seed` 保留为重定向或兼容
-- [ ] **`ext-server/memory_routes.rs`** — seed handler 重命名为 init handler
-- [ ] **前端 `app.js`** — 斜杠命令 `/init` 触发 `init_field` 工具调用
+- [x] **`ext-server/memory_routes.rs`** — seed handler 重命名为 init handler
+- [x] **前端 `app.js`** — 斜杠命令 `/init` 触发 `init_field` 工具调用
   - `/init` 是用户侧入口，指导 LLM 调用 `init_field` tool
   - 移除 `/seed` 斜杠命令
-- [ ] **前端 `app.js`** — 更新 LLM system prompt 中的工具描述
+- [x] **前端 `app.js`** — 更新 LLM system prompt 中的工具描述
 
 ### Phase 3: 场可视化适配（中风险）
 
-- [ ] **`field.js`** — 适配大规模场（50-200 锚点）的渲染
-  - 锚点球体大小根据 density 缩放
-  - 远距离锚点简化渲染
-  - 可能需要 LOD 或聚类显示
-- [ ] **`app.js`** — 锚点列表适配大量数据（虚拟滚动或分页）
+- [x] **`field.js`** — 适配大规模场（50-200 锚点）的渲染
+  - 锚点球体大小根据 density 缩放（densityRatio: 0.5 + 0.5 * density/maxDensity）
+  - 大规模 dimming：anchors > 50 时低于 density 中位数的锚点变暗
+  - 标签 top-K：anchors > 50 时默认只显示 top-20 by density 的标签
+  - 连线简化：anchors > 80 时 rebuildConnections 只处理 top-30 by density
+- [ ] **`app.js`** — 锚点列表适配大量数据（虚拟滚动或分页）（推迟到前端重构）
 
 ## 不在本次范围内
 
