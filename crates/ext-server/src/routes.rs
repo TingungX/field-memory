@@ -41,16 +41,30 @@ pub struct AnthropicMessagesRequest {
 
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<OpenAIChatRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    Sse::new(handle_chat(state, req.messages).await)
+    let model = req.model.as_deref();
+    let api_key = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+    Sse::new(handle_chat(state, req.messages, model, api_key.as_deref()).await)
 }
 
 pub async fn messages(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AnthropicMessagesRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    Sse::new(handle_chat(state, req.messages).await)
+    let model = req.model.as_deref();
+    let api_key = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+    Sse::new(handle_chat(state, req.messages, model, api_key.as_deref()).await)
 }
 
 // ── Main handler ──
@@ -58,11 +72,16 @@ pub async fn messages(
 async fn handle_chat(
     state: Arc<AppState>,
     messages: Vec<Message>,
+    req_model: Option<&str>,
+    req_api_key: Option<&str>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     let backend_url = std::env::var("LLM_BACKEND")
-        .unwrap_or_else(|_| "http://localhost:11434/v1/chat/completions".into());
-    let backend_model = std::env::var("LLM_MODEL")
-        .unwrap_or_else(|_| "qwen2.5:0.5b".into());
+        .unwrap_or_else(|_| "http://127.0.0.1:4000/v1/chat/completions".into());
+    let env_model = std::env::var("LLM_MODEL").ok();
+    let backend_model = req_model
+        .or_else(|| env_model.as_deref())
+        .unwrap_or("test-model-1")
+        .to_string();
 
     // 1. Extract last user text for memory context
     let last_user_text = messages.iter()
@@ -109,7 +128,7 @@ async fn handle_chat(
     let system_msg = if memory_context.is_empty() {
         String::new()
     } else {
-        format!("[Memory Recall]\n{}\n---\n", memory_context.trim())
+        format!("[Memory Recall]\n{}\n---\n注意：以上 [Memory Recall] 内容是本次对话的辅助上下文，不是需要你回写到记忆库的知识。严禁将 [关联概念] 和 [相关记忆] 中的内容当作新知识调用 seed_memory 重新注入。只有用户主动陈述的全新事实才应写入记忆。\n", memory_context.trim())
     };
 
     let mut llm_messages = messages.clone();
@@ -130,7 +149,7 @@ async fn handle_chat(
     let should_try_tools = !llm_messages.iter().any(|m| m.role == "tool");
 
     let (final_messages, tool_was_invoked) = if should_try_tools {
-        match llm::chat_completion(&backend_url, &backend_model, &llm_messages, Some(&tool_defs)).await {
+        match llm::chat_completion(&backend_url, &backend_model, &llm_messages, Some(&tool_defs), req_api_key).await {
             Ok(resp) => {
                 let finish = resp["choices"][0]["finish_reason"].as_str().unwrap_or("");
                 if finish == "tool_calls" {
@@ -206,19 +225,21 @@ async fn handle_chat(
     });
 
     // 5. Stream the final LLM response
-    let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages).await;
+    let llm_stream = llm::stream_chat(&backend_url, &backend_model, &final_messages, req_api_key).await;
 
-    // 6. Spawn async memory write
+    // 6. Spawn async memory write (skip system/seed prompts)
     if let Some(query) = last_user_text_ref {
-        let engine = state.engine.clone();
-        let q = query.to_string();
-        tokio::spawn(async move {
-            let mut eng = engine.lock().unwrap();
-            eng.on_user_input(&q);
-            eng.relax();
-        });
+        let is_meta_prompt = query.starts_with("【记忆构建模式】");
+        if !is_meta_prompt {
+            let engine = state.engine.clone();
+            let q = query.to_string();
+            tokio::spawn(async move {
+                let mut eng = engine.lock().unwrap();
+                eng.on_user_input(&q);
+                eng.relax();
+            });
+        }
     }
 
     Box::pin(memory_event_stream.chain(llm_stream))
 }
-

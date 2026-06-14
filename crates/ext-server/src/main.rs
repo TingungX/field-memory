@@ -1,6 +1,7 @@
 mod routes;
 mod llm;
 mod memory_routes;
+mod sessions;
 mod tools;
 
 use axum::Router;
@@ -8,6 +9,7 @@ use field_mem_core::{DseEngine, DseCoreParams};
 use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 pub struct AppState {
     pub engine: Arc<Mutex<DseEngine>>,
@@ -41,6 +43,12 @@ async fn main() {
         active_library: Arc::new(Mutex::new("default".to_string())),
     });
 
+    // Register the default library so it appears in the library list
+    {
+        let mut libs = state.libraries.lock().unwrap();
+        libs.insert("default".to_string(), (3, 0)); // 3 init anchors, 0 events
+    }
+
     let app = Router::new()
         .route("/v1/chat/completions", axum::routing::post(routes::chat_completions))
         .route("/v1/messages", axum::routing::post(routes::messages))
@@ -54,10 +62,20 @@ async fn main() {
         .route("/api/memory/libraries", axum::routing::get(memory_routes::list_libraries))
         .route("/api/memory/library/save", axum::routing::post(memory_routes::library_save))
         .route("/api/memory/library/load", axum::routing::post(memory_routes::library_load))
+        .route("/api/memory/library/create", axum::routing::post(memory_routes::library_create))
         .route("/api/memory/library/delete", axum::routing::post(memory_routes::library_delete))
+        // Sessions persistence
+        .route("/api/sessions", axum::routing::get(sessions::load).post(sessions::save))
         // Dedicated 3D field visualization page
         .route("/field", axum::routing::get_service(ServeFile::new("crates/ext-server/src/static/field.html")))
-        .fallback_service(ServeDir::new("crates/ext-server/src/static"))
+        .fallback_service(
+            ServeDir::new("crates/ext-server/src/static")
+                .fallback(ServeFile::new("crates/ext-server/src/static/index.html"))
+        )
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::header::CACHE_CONTROL,
+            "no-cache".parse::<axum::http::HeaderValue>().unwrap(),
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

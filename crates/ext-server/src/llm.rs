@@ -16,12 +16,16 @@ fn build_client() -> reqwest::Client {
 fn build_request(
     client: &reqwest::Client,
     backend_url: &str,
+    api_key: Option<&str>,
 ) -> reqwest::RequestBuilder {
     let mut req = client.post(backend_url);
-    if let Ok(api_key) = std::env::var("LLM_API_KEY") {
-        if !api_key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
-        }
+    let env_key = std::env::var("LLM_API_KEY").ok();
+    let key = api_key
+        .filter(|k| !k.is_empty())
+        .or_else(|| env_key.as_deref())
+        .unwrap_or_default();
+    if !key.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", key));
     }
     req
 }
@@ -32,6 +36,7 @@ pub async fn chat_completion(
     model: &str,
     messages: &[Message],
     tools: Option<&[serde_json::Value]>,
+    api_key: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     let client = build_client();
     let mut body = serde_json::json!({
@@ -43,7 +48,7 @@ pub async fn chat_completion(
         body["tools"] = serde_json::json!(t);
     }
 
-    let req = build_request(&client, backend_url).json(&body);
+    let req = build_request(&client, backend_url, api_key).json(&body);
     let resp = req.send().await.map_err(|e| format!("LLM request failed: {e}"))?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| format!("read response failed: {e}"))?;
@@ -59,6 +64,7 @@ pub async fn stream_chat(
     backend_url: &str,
     model: &str,
     messages: &[Message],
+    api_key: Option<&str>,
 ) -> SseStream {
     let client = build_client();
     let body = serde_json::json!({
@@ -67,7 +73,7 @@ pub async fn stream_chat(
         "stream": true,
     });
 
-    let req = build_request(&client, backend_url).json(&body);
+    let req = build_request(&client, backend_url, api_key).json(&body);
 
     let response = match req.send().await
     {

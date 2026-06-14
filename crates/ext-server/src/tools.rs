@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use field_mem_core::DseEngine;
+use field_mem_core::EventSource;
 
 /// All available tool definitions sent to the LLM.
 pub fn tool_definitions() -> Vec<serde_json::Value> {
@@ -127,6 +128,26 @@ fn execute_seed_memory(
     }
 
     let concepts_refs: Vec<(&str, u32)> = concepts.iter().map(|(l, d)| (l.as_str(), *d)).collect();
+
+    // ── Dedup: skip concepts whose anchor label already exists ──
+    let existing_labels: Vec<String> = {
+        let eng = engine.lock().unwrap();
+        eng.anchors.iter().map(|a| a.label.clone()).collect()
+    };
+    let (new_concepts, skipped): (Vec<_>, Vec<_>) = concepts_refs
+        .into_iter()
+        .partition(|(label, _)| !existing_labels.iter().any(|el| el == label));
+
+    if new_concepts.is_empty() {
+        return serde_json::json!({
+            "status": "skipped",
+            "reason": "all concepts already exist as anchors",
+            "skipped_concepts": skipped.iter().map(|(l, d)| serde_json::json!({
+                "label": l, "density": d, "existing": true
+            })).collect::<Vec<_>>(),
+        }).to_string();
+    }
+
     let events_per = 10usize;
     let cycles = 5usize;
     let modifiers = ["擅长", "不喜欢", "需要改进", "重点关注", "积累经验",
@@ -134,11 +155,11 @@ fn execute_seed_memory(
 
     {
         let mut eng = engine.lock().unwrap();
-        for c in &concepts_refs { eng.init(&[*c]); }
+        for c in &new_concepts { eng.init(&[*c]); }
     }
     {
         let mut eng = engine.lock().unwrap();
-        for (label, _) in &concepts {
+        for (label, _) in &new_concepts {
             for i in 0..events_per {
                 let mod_idx = i.min(modifiers.len() - 1);
                 let event_text = if mod_idx == 0 {
@@ -146,9 +167,9 @@ fn execute_seed_memory(
                 } else {
                     format!("{}: {} 相关的讨论和记录", modifiers[mod_idx], label)
                 };
-                eng.on_user_input(&event_text);
+                eng.on_input_with_source(&event_text, EventSource::Seed);
                 if i % 3 == 0 {
-                    eng.on_user_input(&format!("关于{}的补充思考第{}条", label, i + 1));
+                    eng.on_input_with_source(&format!("关于{}的补充思考第{}条", label, i + 1), EventSource::Seed);
                 }
             }
         }
@@ -171,6 +192,13 @@ fn execute_seed_memory(
         })).collect()
     };
 
+    let new_concepts_json: Vec<serde_json::Value> = new_concepts.iter().map(|(l, d)| {
+        serde_json::json!({ "label": l, "density": d })
+    }).collect();
+    let skipped_json: Vec<serde_json::Value> = skipped.iter().map(|(l, d)| {
+        serde_json::json!({ "label": l, "density": d, "existing": true })
+    }).collect();
+
     serde_json::json!({
         "status": "ok",
         "anchors_count": anchors_count,
@@ -178,6 +206,8 @@ fn execute_seed_memory(
         "traces_count": traces_count,
         "field_tension": tension,
         "anchors": anchor_details,
+        "new_concepts": new_concepts_json,
+        "skipped_concepts": skipped_json,
     }).to_string()
 }
 
@@ -264,4 +294,3 @@ fn execute_associate_memory(
         "count": anchors.len(),
     }).to_string()
 }
-

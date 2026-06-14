@@ -2,7 +2,16 @@ use axum::{Json, extract::State};
 use std::path::Path;
 use std::sync::Arc;
 
+use field_mem_core::DseEngine;
 use crate::AppState;
+
+// Use eprintln! for logging since tracing is not available in this crate
+macro_rules! log_info {
+    ($($arg:tt)*) => { eprintln!("[INFO] {}", format!($($arg)*)); };
+}
+macro_rules! log_error {
+    ($($arg:tt)*) => { eprintln!("[ERROR] {}", format!($($arg)*)); };
+}
 
 // ── Response / Request structs ──
 
@@ -356,6 +365,7 @@ pub async fn library_load(
         return Json(serde_json::json!({"ok": false, "error": e}));
     }
     let path = library_path(&req.name);
+    log_info!("library_load: path={:?}", path);
     let mut engine = state.engine.lock().unwrap();
     match engine.load(&path) {
         Ok(_) => {
@@ -364,10 +374,64 @@ pub async fn library_load(
             let e = engine.events.len();
             // Update library registry
             state.libraries.lock().unwrap().insert(req.name.clone(), (a, e));
+            log_info!("library_load: success name={} anchors={} events={}", req.name, a, e);
             Json(serde_json::json!({"ok": true, "name": req.name, "anchors_count": a, "events_count": e}))
         }
-        Err(e) => Json(serde_json::json!({"ok": false, "error": format!("load failed: {e}")})),
+        Err(e) => {
+            log_error!("library_load: failed name={} error={}", req.name, e);
+            Json(serde_json::json!({"ok": false, "error": format!("load failed: {e}")}))
+        }
     }
+}
+
+/// POST /api/memory/library/create — create a new empty library and switch to it
+pub async fn library_create(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<LibraryRequest>,
+) -> Json<serde_json::Value> {
+    if let Err(e) = ensure_library_name(&req.name) {
+        return Json(serde_json::json!({"ok": false, "error": e}));
+    }
+    // Check name not already taken
+    if state.libraries.lock().unwrap().contains_key(&req.name) {
+        return Json(serde_json::json!({"ok": false, "error": format!("记忆库 '{}' 已存在", req.name)}));
+    }
+
+    // Auto-save current engine state before switching (best-effort)
+    {
+        let current = state.active_library.lock().unwrap().clone();
+        let engine = state.engine.lock().unwrap();
+        let path = library_path(&current);
+        let _ = engine.save(&path);
+        let a = engine.anchors.len();
+        let e = engine.events.len();
+        state.libraries.lock().unwrap().insert(current, (a, e));
+    }
+
+    // Reset engine to empty state with same params
+    let params;
+    {
+        let engine = state.engine.lock().unwrap();
+        params = engine.params.clone();
+    }
+    let new_engine = DseEngine::new(params);
+
+    // Save empty engine to target path, then replace in-memory engine
+    let path = library_path(&req.name);
+    {
+        let _ = new_engine.save(&path);
+    }
+
+    {
+        let mut engine = state.engine.lock().unwrap();
+        *engine = new_engine;
+    }
+
+    *state.active_library.lock().unwrap() = req.name.clone();
+    state.libraries.lock().unwrap().insert(req.name.clone(), (0, 0));
+
+    log_info!("library_create: created name={}", req.name);
+    Json(serde_json::json!({"ok": true, "name": req.name, "anchors_count": 0, "events_count": 0}))
 }
 
 /// DELETE /api/memory/library — delete a named library
@@ -439,7 +503,10 @@ pub async fn save(State(state): State<Arc<AppState>>) -> Json<SaveResponse> {
     engine.log_save();
     match result {
         Ok(_) => Json(SaveResponse { ok: true, error: None }),
-        Err(e) => Json(SaveResponse { ok: false, error: Some(format!("读写失败: {e}")) }),
+        Err(e) => {
+            log_error!("save: failed path=./memory_state error={}", e);
+            Json(SaveResponse { ok: false, error: Some(format!("保存失败: {e}")) })
+        }
     }
 }
 
@@ -454,13 +521,16 @@ pub async fn load(State(state): State<Arc<AppState>>) -> Json<LoadResponse> {
             events_count: engine.events.len(),
             seeds_count: engine.seeds.len(),
         }),
-        Err(e) => Json(LoadResponse {
-            ok: false,
-            error: Some(format!("{e}")),
-            anchors_count: 0,
-            events_count: 0,
-            seeds_count: 0,
-        }),
+        Err(e) => {
+            log_error!("load: failed path=./memory_state error={}", e);
+            Json(LoadResponse {
+                ok: false,
+                error: Some(format!("读取失败: {e}")),
+                anchors_count: 0,
+                events_count: 0,
+                seeds_count: 0,
+            })
+        }
     }
 }
 
