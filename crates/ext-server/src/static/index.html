@@ -2,19 +2,17 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f4f0">
   <title>field-memory 控制台</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20260614">
 </head>
 <body>
 
 <header>
   <h1>field-memory</h1>
   <select id="lib-select" onchange="onLibraryChange(this.value)"></select>
-  <button class="hdr-btn" onclick="showLibraryDialog()">管理</button>
-  <select id="model-select"><option>test-model-1</option><option>test-model-2</option></select>
-  <input id="api-key" type="password" placeholder="API Key" value="sk-fm">
-  <input id="backend-url" type="text" placeholder="代理地址" value="http://127.0.0.1:5100">
+  <button class="hdr-btn" onclick="showLibraryDialog()">库</button>
 </header>
 
 <div id="columns">
@@ -32,6 +30,14 @@
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     </button>
+    <button class="rail-btn" id="settings-btn" title="设置" onclick="openSettings()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="6" rx="1.5"/>
+        <rect x="3" y="14" width="18" height="6" rx="1.5"/>
+        <line x1="7" y1="7" x2="7.01" y2="7"/>
+        <line x1="7" y1="17" x2="7.01" y2="17"/>
+      </svg>
+    </button>
     <button class="rail-btn" data-panel="panel-mem" data-side="right" title="记忆面板">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -45,6 +51,7 @@
   <div id="session-sidebar" class="collapsible side-left">
     <div class="sb-header">
       <h3>会话</h3>
+      <button class="sb-sync" onclick="manualSessionSync()" title="立即同步 (从服务器拉取/推送)">↻</button>
       <button class="sb-new" onclick="createSession()" title="新会话">+</button>
     </div>
     <div id="session-list"></div>
@@ -54,7 +61,16 @@
 
   <!-- Chat -->
   <div id="panel-chat">
-    <div id="messages"></div>
+    <div class="chat-tabs" id="chat-tabs">
+      <button class="chat-tab active" data-tab="conversation">对</button>
+      <button class="chat-tab" data-tab="system">系统</button>
+      <button class="chat-tab" data-tab="skills">技能</button>
+      <button class="chat-tab" data-tab="memory">注入</button>
+    </div>
+    <div class="chat-view" id="chat-view">
+      <div id="messages"></div>
+    </div>
+    <div class="chat-detail" id="chat-detail" hidden></div>
     <div id="input-area">
       <textarea id="user-input" rows="1" placeholder="输入消息，/ 查看命令…"></textarea>
       <button id="send-btn" onclick="send()">↑</button>
@@ -67,7 +83,37 @@
 
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=20260614"></script>
+
+<div id="settings-modal" class="modal" hidden>
+  <div class="modal-backdrop" onclick="closeSettings()"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>后端 LLM 接入</h2>
+      <button class="modal-close" onclick="closeSettings()" aria-label="关闭">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label for="settings-backend-url">代理地址</label>
+        <input id="settings-backend-url" type="text" placeholder="(留空 = 当前页面地址)">
+        <span class="form-hint">前端请求的目标地址（留空 = 同源，自动适配手机/LAN 访问；通常就是 ext-server 自己）</span>
+      </div>
+      <div class="form-row">
+        <label for="settings-model">模型</label>
+        <input id="settings-model" type="text" placeholder="test-model-1">
+        <span class="form-hint">透传给后端 LLM 的 model 字段</span>
+      </div>
+      <div class="form-row">
+        <label for="settings-api-key">API Key</label>
+        <input id="settings-api-key" type="password" placeholder="sk-fm">
+        <span class="form-hint">ext-server 用此 key 调上游 LLM</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
-

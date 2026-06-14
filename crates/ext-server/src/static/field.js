@@ -37,13 +37,27 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 function computeCanvasSize() {
   const leftPanel = document.getElementById('panel-left-field');
   const rightPanel = document.getElementById('panel-right-field');
-  const railW = 44; // rail is always visible
-  const leftW = leftPanel && !leftPanel.classList.contains('collapsed') ? 232 : 0;
-  const rightW = rightPanel && !rightPanel.classList.contains('collapsed') ? 304 : 0;
+  const isMobile = window.innerWidth <= 768;
+  // On mobile, rail is the bottom tab bar (52px + safe-area); side panels are overlays (don't affect canvas size).
+  // On desktop, rail is left sidebar (44px); side panels are inline.
+  const railW = isMobile ? 0 : 44;
+  const bottomNav = isMobile ? 52 + _safeBottom() : 36;
+  const leftW = !isMobile && leftPanel && !leftPanel.classList.contains('collapsed') ? 232 : 0;
+  const rightW = !isMobile && rightPanel && !rightPanel.classList.contains('collapsed') ? 304 : 0;
+  const topBar = 48 + _safeTop();
   return {
     w: Math.max(100, window.innerWidth - railW - leftW - rightW),
-    h: Math.max(100, window.innerHeight - 52 - 36),
+    h: Math.max(100, window.innerHeight - topBar - bottomNav),
   };
+}
+
+function _safeTop() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--safe-top').trim();
+  return v.endsWith('px') ? parseFloat(v) || 0 : 0;
+}
+function _safeBottom() {
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom').trim();
+  return v.endsWith('px') ? parseFloat(v) || 0 : 0;
 }
 {
   const s = computeCanvasSize();
@@ -515,7 +529,20 @@ const pickableMeshes = () => {
   return arr;
 };
 
+// Helper: check if event target is inside a side panel (not canvas)
+function isOverPanel(e) {
+  const target = e.target;
+  if (!target) return false;
+  // Check if the event target is inside a collapsible panel
+  const panel = target.closest ? target.closest('.collapsible') : null;
+  if (panel && !panel.classList.contains('collapsed')) return true;
+  // Also check if target is the panel itself
+  if (target.classList && target.classList.contains('collapsible')) return true;
+  return false;
+}
+
 canvas.addEventListener('pointermove', (e) => {
+  if (isOverPanel(e)) return;
   const rect = canvas.getBoundingClientRect();
   mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -539,6 +566,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 canvas.addEventListener('mousemove', (e) => {
+  if (isOverPanel(e)) return;
   const rect = canvas.getBoundingClientRect();
   mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -562,7 +590,8 @@ canvas.addEventListener('mousemove', (e) => {
   applyFocus();
 });
 
-canvas.addEventListener('click', () => {
+canvas.addEventListener('click', (e) => {
+  if (isOverPanel(e)) return;
   if (state.hoverId) {
     selectAnchor(state.hoverId);
   } else if (state.selectedId) {
@@ -812,7 +841,69 @@ window.addEventListener('error', (e) => {
 });
 
 // ── Rail panel toggle ──────────────────────────────
+
+// Mobile overlay helpers — injected once.
+let _mobileOverlayInited = false;
+function ensureMobileOverlay() {
+  if (_mobileOverlayInited) return;
+  _mobileOverlayInited = true;
+  // Inject compact layer legend in topbar (hidden on desktop by CSS)
+  const topbar = document.querySelector('.topbar');
+  if (topbar && !topbar.querySelector('.mobile-legend')) {
+    const legend = document.createElement('span');
+    legend.className = 'mobile-legend';
+    legend.innerHTML = '<span class="dot l1"></span><span class="dot l2"></span><span class="dot l3"></span><span class="dot l4"></span>';
+    topbar.insertBefore(legend, topbar.querySelector('.spacer'));
+  }
+  // Inject a close button at the top of each collapsible panel
+  document.querySelectorAll('.collapsible').forEach(panel => {
+    if (panel.querySelector('.panel-close')) return;
+    const btn = document.createElement('button');
+    btn.className = 'panel-close';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', '关闭面板');
+    btn.textContent = '×';
+    panel.insertBefore(btn, panel.firstChild);
+    btn.addEventListener('click', () => {
+      panel.classList.add('collapsed');
+      syncOverlayBodyClass();
+      const railBtn = document.querySelector('#rail .rail-btn[data-panel="' + panel.id + '"]');
+      if (railBtn) railBtn.classList.remove('active');
+      const storageKey = panel.id === 'panel-left-field' ? 'field-panelLeft'
+                       : panel.id === 'panel-right-field' ? 'field-panelRight' : null;
+      if (storageKey) sessionStorage.setItem(storageKey, 'collapsed');
+    });
+  });
+  // Inject backdrop element
+  if (!document.querySelector('.panel-backdrop')) {
+    const bd = document.createElement('div');
+    bd.className = 'panel-backdrop';
+    document.body.appendChild(bd);
+    bd.addEventListener('click', () => {
+      document.querySelectorAll('.collapsible').forEach(p => p.classList.add('collapsed'));
+      document.querySelectorAll('#rail .rail-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.collapsible').forEach(p => {
+        const k = p.id === 'panel-left-field' ? 'field-panelLeft'
+                : p.id === 'panel-right-field' ? 'field-panelRight' : null;
+        if (k) sessionStorage.setItem(k, 'collapsed');
+      });
+      syncOverlayBodyClass();
+    });
+  }
+}
+
+function syncOverlayBodyClass() {
+  let anyOpen = false;
+  document.querySelectorAll('.collapsible').forEach(p => {
+    if (!p.classList.contains('collapsed')) anyOpen = true;
+  });
+  document.body.classList.toggle('panel-open', anyOpen);
+}
+
 function initPanelToggles() {
+  // Mobile overlay injection (CSS hides chrome on desktop)
+  ensureMobileOverlay();
+
   const panelConfigs = [
     { id: 'panel-left-field', storageKey: 'field-panelLeft', dir: 'left' },
     { id: 'panel-right-field', storageKey: 'field-panelRight', dir: 'right' },
@@ -825,6 +916,7 @@ function initPanelToggles() {
     const isOpen = sessionStorage.getItem(cfg.storageKey) !== 'collapsed';
     if (!isOpen) panel.classList.add('collapsed');
   });
+  syncOverlayBodyClass();
 
   // Bind rail buttons
   document.querySelectorAll('#rail .rail-btn').forEach(btn => {
@@ -840,6 +932,22 @@ function initPanelToggles() {
       const nowCollapsed = panel.classList.toggle('collapsed');
       if (storageKey) sessionStorage.setItem(storageKey, nowCollapsed ? 'collapsed' : 'expanded');
       btn.classList.toggle('active', !nowCollapsed);
+      // On mobile: close other panels when opening this one
+      if (!nowCollapsed && window.innerWidth <= 768) {
+        document.querySelectorAll('#rail .rail-btn').forEach(otherBtn => {
+          const otherPanelId = otherBtn.getAttribute('data-panel');
+          if (otherPanelId !== panelId) {
+            const otherPanel = document.getElementById(otherPanelId);
+            if (otherPanel && !otherPanel.classList.contains('collapsed')) {
+              otherPanel.classList.add('collapsed');
+              const otherKey = panelConfigs.find(c => c.id === otherPanelId)?.storageKey;
+              if (otherKey) sessionStorage.setItem(otherKey, 'collapsed');
+              otherBtn.classList.remove('active');
+            }
+          }
+        });
+      }
+      syncOverlayBodyClass();
       // Recompute canvas size after panel toggle
       setTimeout(resize, 280);
     });

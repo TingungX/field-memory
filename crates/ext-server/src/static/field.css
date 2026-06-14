@@ -332,7 +332,7 @@
       overflow: hidden;
       position: relative;
     }
-    .collapsible.collapsed {
+.collapsible.collapsed {
       width: 0 !important;
       padding: 0 !important;
       border: none !important;
@@ -341,3 +341,151 @@
       overflow: hidden;
     }
 
+    /* ── mobile portrait ─────────────────────────────
+       Breakpoint: ≤768px.
+       Strategy: bottom tab bar (rail) + overlay panels.
+       The desktop legend bottombar is replaced by the rail as bottom nav. */
+    @media (max-width: 768px) {
+
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      /* topbar: compact, hide stats inline (shown via tap) */
+      .topbar {
+        padding: 0 12px;
+        height: 48px;
+        gap: 10px;
+        padding-top: var(--safe-top);
+        height: calc(48px + var(--safe-top));
+      }
+      .brand .sub { display: none; }
+      .stats { display: none; }   /* hidden by default; toggle via JS if needed */
+      .topbar .btn { padding: 5px 10px; font-size: 11px; }
+      /* show a compact legend in topbar on mobile */
+      .topbar .mobile-legend {
+        display: inline-flex; gap: 6px; align-items: center; margin-left: auto;
+      }
+      .topbar .mobile-legend .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+      }
+      .topbar .mobile-legend .dot.l1 { background: var(--l1); box-shadow: 0 0 6px var(--l1); }
+      .topbar .mobile-legend .dot.l2 { background: var(--l2); box-shadow: 0 0 6px var(--l2); }
+      .topbar .mobile-legend .dot.l3 { background: var(--l3); box-shadow: 0 0 6px var(--l3); }
+      .topbar .mobile-legend .dot.l4 { background: var(--l4); box-shadow: 0 0 6px var(--l4); }
+
+      /* .app: flex column so rail can be bottom nav; canvas fills middle */
+      .app {
+        top: calc(48px + var(--safe-top));
+        bottom: calc(52px + var(--safe-bottom));
+        flex-direction: column;
+      }
+
+      /* rail: left side → bottom tab bar */
+      #rail {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        width: 100%;
+        height: calc(52px + var(--safe-bottom));
+        flex-direction: row;
+        justify-content: space-around;
+        padding: 4px 6px var(--safe-bottom);
+        border-right: none;
+        border-top: 1px solid var(--border);
+        z-index: 30;
+      }
+      .rail-btn { width: 48px; height: 44px; }
+      /* active indicator: top instead of left */
+      .rail-btn.active::after {
+        left: 50%; top: 2px;
+        transform: translateX(-50%);
+        width: 18px; height: 3px;
+      }
+
+      /* canvas-wrap: takes remaining space (top of .app down to rail) */
+      .canvas-wrap { width: 100%; height: 100%; }
+
+      /* hide desktop bottombar — replaced by rail as bottom nav */
+      .bottombar { display: none; }
+
+      /* side panels → fixed overlay sheets, slide in/out */
+      .panel-left, .panel-right {
+        position: fixed !important;
+        top: calc(48px + var(--safe-top));
+        bottom: calc(52px + var(--safe-bottom));
+        height: auto !important;
+        max-height: calc(100dvh - 52px - 48px - var(--safe-top) - var(--safe-bottom));
+        width: min(86vw, 320px) !important;
+        z-index: 50;
+        transition: transform 0.28s ease, opacity 0.2s ease !important;
+        border: none !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      }
+      .collapsible.collapsed {
+        width: min(86vw, 320px) !important;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .panel-left {
+        left: 0; transform: translateX(0);
+        border-right: 1px solid var(--border) !important;
+      }
+      .panel-left.collapsed { transform: translateX(-100%); }
+      .panel-right {
+        right: 0; transform: translateX(0);
+        border-left: 1px solid var(--border) !important;
+      }
+      .panel-right.collapsed { transform: translateX(100%); }
+      /* override desktop width rules — only the slide-in width matters */
+      #panel-left-field { width: min(86vw, 320px) !important; }
+      #panel-right-field { width: min(86vw, 320px) !important; }
+      .panel-left { padding: 16px 14px; }
+      .panel-right { padding: 16px 14px; }
+
+      /* backdrop — dims canvas when panel is open */
+      .panel-backdrop {
+        position: fixed;
+        top: calc(48px + var(--safe-top));
+        left: 0; right: 0; bottom: calc(52px + var(--safe-bottom));
+        background: rgba(0,0,0,0.45);
+        z-index: 40;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      body.panel-open .panel-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      /* close button — only visible on mobile when panel is open */
+      .panel-close {
+        position: sticky;
+        top: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px; height: 32px;
+        margin-left: auto;
+        margin-bottom: 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        background: var(--surface-2);
+        color: var(--text);
+        font-size: 16px; line-height: 1;
+        cursor: pointer;
+        z-index: 2;
+      }
+      .panel-close:active { background: rgba(126, 162, 214, 0.18); }
+      /* hide on desktop (defensive — outside @media they're hidden by JS) */
+      @media (min-width: 769px) { .panel-close { display: none !important; } }
+
+      /* hud — slightly smaller, more padding from edges */
+      .hud {
+        bottom: 8px; left: 8px;
+        padding: 5px 9px;
+        font-size: 10px;
+        line-height: 1.6;
+      }
+    }
