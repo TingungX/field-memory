@@ -1,0 +1,660 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "field-memory v2：6,611 条记忆的可行性验证",
+    "description": "对 v2 场模型观察骨架与传统 hybrid RAG 的规模化、可审计比较。",
+    "generatedAt": "2026-08-10T00:10:00+08:00",
+    "sources": [
+      {
+        "id": "scale-results",
+        "label": "保存的 v2 规模化结果",
+        "path": "experiments/v2_feasibility/results_scale.json",
+        "query": {
+          "engine": "file",
+          "language": "json",
+          "sql": "SELECT 6611 AS memory_count, 2161 AS query_count, 64 AS write_count, 0.5624441101636399 AS traditional_recall_at_5, 0.017176241158193956 AS v2_recall_at_5;",
+          "description": "6,611 memory、2,161 query、64 write 的完整 deterministic 结果与 sensitivity 输出。",
+          "tables_used": [
+            "experiments/v2_feasibility/results_scale.json"
+          ],
+          "filters": [
+            "top_k = 5",
+            "v2 default sample_budget = 96",
+            "warm sequential read/write protocol"
+          ],
+          "metric_definitions": [
+            "Recall@5 = relevant evidence IDs returned in the first five items divided by all relevant evidence IDs for a query, averaged over 2,161 queries.",
+            "MRR and NDCG@5 are computed from deterministic evidence IDs; no LLM score is used.",
+            "Sample coverage = sample_budget divided by 6,611 anchors for each capacity point."
+          ]
+        }
+      },
+      {
+        "id": "headline-source",
+        "label": "规模结果的 headline metric extract",
+        "path": "experiments/v2_feasibility/results_scale.json",
+        "query": {
+          "engine": "sqlite",
+          "language": "sql",
+          "sql": "WITH headline_metrics(metric_id, value, comparison_value, delta, label) AS (VALUES ('baseline_recall', 0.5624441101636399, 0.017176241158193956, -0.545267869005446, 'traditional hybrid RAG'), ('v2_recall', 0.017176241158193956, 0.5624441101636399, -0.545267869005446, 'v2 warm sequential'), ('default_coverage', 0.014521252458024504, 96, NULL, 'default sample projection'), ('replay_read', 0.0, 1.0, NULL, 'v2 replay readout')) SELECT * FROM headline_metrics;",
+          "description": "从保存的 deterministic result JSON 提取的四个 headline metric；VALUES 行与 snapshot.headline_metrics 一一对应。",
+          "tables_used": [
+            "experiments/v2_feasibility/results_scale.json"
+          ],
+          "metric_definitions": [
+            "All displayed rates are deterministic result values and not LLM judgments."
+          ]
+        }
+      },
+      {
+        "id": "pipeline-source",
+        "label": "规模结果的 pipeline metric extract",
+        "path": "experiments/v2_feasibility/results_scale.json",
+        "query": {
+          "engine": "sqlite",
+          "language": "sql",
+          "sql": "WITH pipeline_metrics(pipeline, query_count, precision_at_5, recall_at_5, mrr, ndcg_at_5, sample_budget, sample_coverage) AS (VALUES ('traditional hybrid RAG', 2161, 0.1289217954650625, 0.5624441101636399, 0.4594632114761685, 0.4712349389820677, NULL, NULL), ('v2 warm sequential', 2161, 0.004720037019898196, 0.017176241158193956, 0.01699830325466605, 0.015156047911559216, 96, 0.014521252458024504)) SELECT * FROM pipeline_metrics;",
+          "description": "两条 pipeline 的平均 deterministic retrieval metric；VALUES 行与 snapshot.pipeline_metrics 一一对应。",
+          "tables_used": [
+            "experiments/v2_feasibility/results_scale.json"
+          ],
+          "metric_definitions": [
+            "Each metric averages per-query evidence-ID results over 2,161 queries."
+          ]
+        }
+      },
+      {
+        "id": "capacity-source",
+        "label": "规模结果的 v2 capacity extract",
+        "path": "experiments/v2_feasibility/results_scale.json",
+        "query": {
+          "engine": "sqlite",
+          "language": "sql",
+          "sql": "WITH capacity_curve(sample_budget, coverage, precision_at_5, recall_at_5, mrr, ndcg_at_5) AS (VALUES (32, 0.004840417486008168, 0.0015733456732993985, 0.005387393272903794, 0.007635354002776492, 0.005774007054351078), (96, 0.014521252458024504, 0.004720037019898196, 0.017176241158193956, 0.01699830325466605, 0.015156047911559216), (192, 0.029042504916049008, 0.007403979639055993, 0.02759602684201862, 0.02590621625790529, 0.02318188708447724), (512, 0.07744667977613069, 0.013512262841277187, 0.05669613258814165, 0.04015887706308808, 0.04222353047339345), (1024, 0.15489335955226138, 0.028042572882924575, 0.11860517789403481, 0.07608360327009099, 0.08262643028316029), (2048, 0.30978671910452277, 0.042665432670060156, 0.1837652321456116, 0.10059386086688261, 0.11702407999370276), (4096, 0.6195734382090455, 0.058306339657565945, 0.25930510566095943, 0.14146999845750424, 0.16608709722733098)) SELECT * FROM capacity_curve;",
+          "description": "七个 sample-budget sensitivity point；VALUES 行与 snapshot.capacity_curve 一一对应。",
+          "tables_used": [
+            "experiments/v2_feasibility/results_scale.json"
+          ],
+          "metric_definitions": [
+            "Coverage equals sample_budget / 6,611 anchors.",
+            "Recall@5, MRR, and NDCG@5 are deterministic averages over the same 2,161 warm sequential queries."
+          ]
+        }
+      },
+      {
+        "id": "write-source",
+        "label": "规模结果的 write/read extract",
+        "path": "experiments/v2_feasibility/results_scale.json",
+        "query": {
+          "engine": "sqlite",
+          "language": "sql",
+          "sql": "WITH write_outcomes(metric_order, observation, traditional, v2, case_count) AS (VALUES (1, 'exact self-hit after write', 1.0, NULL, 64), (2, 'event log contains write', NULL, 1.0, 64), (3, 'raw event text returned', NULL, 0.0, 64), (4, 'replay reads expected anchor', NULL, 0.0, 32)) SELECT * FROM write_outcomes;",
+          "description": "由 64 个 write case 汇总的写入/回读观察；VALUES 行与 snapshot.write_outcomes 一一对应。",
+          "tables_used": [
+            "experiments/v2_feasibility/results_scale.json"
+          ],
+          "metric_definitions": [
+            "Traditional exact self-hit is a write-pipeline sanity check, not an independent quality benchmark.",
+            "V2 event-log containment and readout are separate observations."
+          ]
+        }
+      },
+      {
+        "id": "scale-dataset",
+        "label": "LoCoMo 与项目压力数据集",
+        "path": "experiments/v2_feasibility/dataset_scale.json",
+        "query": {
+          "engine": "file",
+          "language": "json",
+          "description": "Pinned LoCoMo turns/evidence 与当前仓库文档、代码 chunk 组成的可重建规模数据集。",
+          "tables_used": [
+            "experiments/v2_feasibility/dataset_scale.json"
+          ],
+          "filters": [
+            "1,977 evidence-linked LoCoMo queries",
+            "184 deterministic project-context queries",
+            "9 unresolved LoCoMo evidence items excluded from scoring"
+          ],
+          "metric_definitions": [
+            "Memory grain is one LoCoMo dialogue turn or one deterministic repository chunk.",
+            "Write suite contains 32 replay cases and 32 novel events."
+          ]
+        }
+      },
+      {
+        "id": "v2-design",
+        "label": "field-memory v2 设计草案",
+        "path": "docs/superpowers/specs/2026-07-04-field-memory-v2-design.md"
+      },
+      {
+        "id": "integration-records",
+        "label": "真实模型接入记录",
+        "path": "experiments/v2_feasibility/llm_smoke_traditional_responses_stream.json",
+        "query": {
+          "engine": "file",
+          "language": "json",
+          "description": "test-model 的受控 context-consumption transport smoke test；不包含任何 LLM 评分。",
+          "tables_used": [
+            "experiments/v2_feasibility/llm_smoke_failure.json",
+            "experiments/v2_feasibility/llm_smoke_traditional_responses_stream.json",
+            "experiments/v2_feasibility/llm_smoke_v2_interrupted.json"
+          ],
+          "metric_definitions": [
+            "Integration records establish transport behavior only and are excluded from all retrieval and write/read metrics."
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "baseline-recall",
+        "description": "传统 hybrid RAG 在全部 2,161 个 query 上的 deterministic Recall@5。",
+        "dataset": "headline_metrics",
+        "filter": {
+          "metric_id": "baseline_recall"
+        },
+        "sourceId": "headline-source",
+        "metrics": [
+          {
+            "label": "传统 Recall@5",
+            "field": "value",
+            "format": "percent"
+          },
+          {
+            "label": "v2 值",
+            "field": "comparison_value",
+            "format": "percent"
+          },
+          {
+            "label": "v2 相差",
+            "field": "delta",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "v2-recall",
+        "description": "默认 96-sample v2 warm sequential 在相同 query 集上的 deterministic Recall@5。",
+        "dataset": "headline_metrics",
+        "filter": {
+          "metric_id": "v2_recall"
+        },
+        "sourceId": "headline-source",
+        "metrics": [
+          {
+            "label": "v2 Recall@5",
+            "field": "value",
+            "format": "percent"
+          },
+          {
+            "label": "传统值",
+            "field": "comparison_value",
+            "format": "percent"
+          },
+          {
+            "label": "相差",
+            "field": "delta",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "default-coverage",
+        "description": "默认 sample projection 在每个 event 中覆盖的 anchor 比例。",
+        "dataset": "headline_metrics",
+        "filter": {
+          "metric_id": "default_coverage"
+        },
+        "sourceId": "headline-source",
+        "metrics": [
+          {
+            "label": "默认 coverage",
+            "field": "value",
+            "format": "percent"
+          },
+          {
+            "label": "每 event samples",
+            "field": "comparison_value",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "replay-read",
+        "description": "默认 v2 观察骨架在 replay write 后读回预期 anchor 的比例。",
+        "dataset": "headline_metrics",
+        "filter": {
+          "metric_id": "replay_read"
+        },
+        "sourceId": "headline-source",
+        "metrics": [
+          {
+            "label": "replay 读回率",
+            "field": "value",
+            "format": "percent"
+          },
+          {
+            "label": "event-log 写入率",
+            "field": "comparison_value",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "retrieval-quality",
+        "title": "两条检索管线的 Recall@5",
+        "subtitle": "2,161 个 query；v2 的默认 96-sample warm sequential 显著低于传统 hybrid RAG。",
+        "type": "bar",
+        "intent": "comparison",
+        "dataset": "pipeline_metrics",
+        "sourceId": "pipeline-source",
+        "layout": "full",
+        "encodings": {
+          "x": {
+            "field": "pipeline",
+            "type": "nominal",
+            "label": "pipeline"
+          },
+          "y": {
+            "field": "recall_at_5",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Recall@5"
+          },
+          "tooltip": [
+            {
+              "field": "query_count",
+              "type": "quantitative",
+              "label": "queries"
+            },
+            {
+              "field": "precision_at_5",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "Precision@5"
+            },
+            {
+              "field": "mrr",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "MRR"
+            },
+            {
+              "field": "ndcg_at_5",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "NDCG@5"
+            }
+          ]
+        }
+      },
+      {
+        "id": "capacity-curve",
+        "title": "v2 sample budget 与 Recall@5",
+        "subtitle": "覆盖率增加时 recall 单调改善，但到 4,096 samples 仍未达到传统 baseline。",
+        "type": "line",
+        "intent": "trend",
+        "dataset": "capacity_curve",
+        "sourceId": "capacity-source",
+        "layout": "full",
+        "encodings": {
+          "x": {
+            "field": "sample_budget",
+            "type": "quantitative",
+            "label": "sample budget"
+          },
+          "y": {
+            "field": "recall_at_5",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "Recall@5"
+          },
+          "tooltip": [
+            {
+              "field": "coverage",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "anchor coverage"
+            },
+            {
+              "field": "mrr",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "MRR"
+            },
+            {
+              "field": "ndcg_at_5",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "NDCG@5"
+            }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "capacity-table",
+        "title": "v2 容量敏感性明细",
+        "subtitle": "所有点使用相同的 6,611-anchor 数据集与 2,161 个 warm sequential query。",
+        "dataset": "capacity_curve",
+        "sourceId": "capacity-source",
+        "layout": "full",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "sample_budget",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "sample_budget",
+            "label": "sample budget",
+            "format": "number"
+          },
+          {
+            "field": "coverage",
+            "label": "anchor coverage",
+            "format": "percent"
+          },
+          {
+            "field": "recall_at_5",
+            "label": "Recall@5",
+            "format": "percent"
+          },
+          {
+            "field": "mrr",
+            "label": "MRR",
+            "format": "percent"
+          },
+          {
+            "field": "ndcg_at_5",
+            "label": "NDCG@5",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "write-table",
+        "title": "写入与回读观察",
+        "subtitle": "64 个 write case：32 replay、32 novel；写入进入 event log 不等同于可回读。",
+        "dataset": "write_outcomes",
+        "sourceId": "write-source",
+        "layout": "full",
+        "density": "spacious",
+        "defaultSort": {
+          "field": "metric_order",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "metric_order",
+            "label": "#",
+            "format": "number"
+          },
+          {
+            "field": "observation",
+            "label": "observation",
+            "type": "text"
+          },
+          {
+            "field": "traditional",
+            "label": "traditional",
+            "format": "percent"
+          },
+          {
+            "field": "v2",
+            "label": "v2",
+            "format": "percent"
+          },
+          {
+            "field": "case_count",
+            "label": "cases",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# field-memory v2：6,611 条记忆的可行性验证"
+      },
+      {
+        "id": "technical-summary",
+        "type": "markdown",
+        "body": "## 技术摘要\n\n当前 v2 观察骨架**不能替代传统可用的 RAG 记忆层**。在相同 6,611 memory、2,161 query、top-5 证据检索条件下，传统 hybrid RAG 的 Recall@5 为 56.24%，v2 为 1.72%。把 sample budget 从 96 提升至 4,096，会把 v2 Recall@5 提升到 25.93%，但仍明显低于 baseline。\n\n这不是 30 条样本的偶然性：数据和结果工件已通过唯一性、evidence 引用、逐行覆盖、平均指标重算、写入汇总和 capacity-curve 审计。结果说明默认 sample projection 的覆盖不足是一个明确瓶颈，但扩大覆盖也不足以修复链式传播/readout/feedback 的检索质量。\n\n写入侧同样未满足生产门槛：64/64 v2 write 进入 event log，却有 0/64 返回原事件文本，32 个 replay write 的预期 anchor 读回率也为 0%。LLM 仅被用于真实 context transport smoke test，绝不参与这些分数。",
+        "sourceId": "scale-results"
+      },
+      {
+        "id": "headline-metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "baseline-recall",
+          "v2-recall",
+          "default-coverage",
+          "replay-read"
+        ]
+      },
+      {
+        "id": "read-quality-heading",
+        "type": "markdown",
+        "body": "## 读取质量差距覆盖所有来源类别\n\n传统 baseline 在 LoCoMo 的五个原始类别以及项目压力 query 上都领先。v2 不是因少返回结果而输：两者几乎都返回 5 条，但 v2 返回的 ID 很少命中 evidence。项目压力集的 traditional Recall@5 为 100%，v2 为 0%，说明当前 projection/readout 没有保留工程语义的可检索性。",
+        "sourceId": "scale-results"
+      },
+      {
+        "id": "read-quality-chart",
+        "type": "chart",
+        "chartId": "retrieval-quality"
+      },
+      {
+        "id": "capacity-heading",
+        "type": "markdown",
+        "body": "## 增加采样覆盖会改善结果，但不是完整修复\n\n从 32 到 4,096 samples，v2 Recall@5 单调从 0.54% 提升到 25.93%，证明容量约束真实存在。可是 4,096 已覆盖 61.96% anchors，仍未达到 56.24% 的传统 recall。因此下一阶段不能把“提高默认 budget”误当作可行化完成；采样生成、relay attenuation、readout 映射和 collapse 的组合都需要独立验收。",
+        "sourceId": "scale-results"
+      },
+      {
+        "id": "capacity-chart",
+        "type": "chart",
+        "chartId": "capacity-curve"
+      },
+      {
+        "id": "capacity-table-block",
+        "type": "table",
+        "tableId": "capacity-table"
+      },
+      {
+        "id": "write-heading",
+        "type": "markdown",
+        "body": "## 读写强等价尚没有可验证的持久化契约\n\n观察骨架确实让 write 与 read 都经由 `perturb`：事件日志 64/64 包含 write。但是 novel event 不创建可回读 anchor，replay write 的后续 readout 也没有回到预期 anchor。这个差异应先被定义为明确的产品/物理契约，而不是用更高 density 或额外标签掩盖。",
+        "sourceId": "scale-results"
+      },
+      {
+        "id": "write-table-block",
+        "type": "table",
+        "tableId": "write-table"
+      },
+      {
+        "id": "scope-methods",
+        "type": "markdown",
+        "body": "## 范围、数据与方法\n\n设计草案把场视为唯一 ontology：anchor 是持久化投影，sample 是即时交互投影；`perturb` 同时读写，时间按事件步推进，影响经 sample 串行传播并在 feedback 前读出。草案仍未接受 sample 生成、邻域趋势、relay 函数、readout 协议、event 持久化和迁移规则，因此本实验把这些作为显式 operationalization，而不是偷偷的正式设计。\n\n参考系统选择 Mem0 的公开 memory/RAG 路径；baseline 使用真实本机 Ollama BGE-M3 向量、lexical overlap 与小 recency 项。规模数据由 pinned LoCoMo turn/evidence 和当前仓库的 deterministic 文档/code chunks 构成。所有评分均为 evidence-ID 的 deterministic retrieval metric。",
+        "sourceId": "v2-design"
+      },
+      {
+        "id": "integration",
+        "type": "markdown",
+        "body": "## 真实模型接入：transport 被测到，但不能作评测器\n\n`test-model` 的 traditional retrieved context 经 Responses SSE 得到 HTTP 200，并在 12.7 秒后返回模型输出；160-token cap 被 reasoning 占用，故可见答案截断。v2 retrieved context 的单题请求获取了 HTTP response，但 90 秒没有一个 SSE payload，随后按进程控制阈值被主动停止。非流式路径还会因 proxy usage SQLite lock 把已完成上游调用转换成 HTTP 500。\n\n这些记录证明本实验确实触及真实模型/代理边界，也证明该边界当前不稳定；它们完全不进入图表、表格或结论中的 retrieval/write/read 分数。",
+        "sourceId": "integration-records"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 局限与稳健性边界\n\n这不是完整的 Mem0 stack benchmark：没有运行其 LLM extraction 或 Qdrant 服务。v2 仍是观察骨架，warm sequential 使读本身改变状态，因而不能把它当作 cold query 的无状态分数。未运行 6,611 full-coverage 点；4,096 已足以排除“仅把 96 调大即可追平”的解释，但不是理论上界。采样点/event 的生产持久化、进程重启与 bincode 迁移也尚未验证。",
+        "sourceId": "scale-results"
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "body": "## 建议的可行化顺序\n\n1. 冻结 `perturb` 可观测契约：coverage、chain、readout anchor IDs、event ID、state delta。\n2. 在调物理参数前定义 novel event 与 replay 的可回读语义。\n3. 单独实验 sample generation/capacity，明确 fixed、local 或随场规模增长的 budget。\n4. 分离 cold、warm、replay 三个 protocol，报告 density floor、drift 和事件顺序稳定性。\n5. 只有在读取接近 baseline、write 可定义回读、重启可恢复且容量/延迟曲线可解释后，才考虑隔离的生产试验。"
+      },
+      {
+        "id": "further-questions",
+        "type": "markdown",
+        "body": "## 进一步问题\n\n- sample 应覆盖全场、局部邻域，还是可重放的 event-specific projection？\n- relay absorption 的可检验来源是 density、局部梯度还是邻域趋势？\n- 未触及 anchor 的 collapse 是否应该在每 event 发生？\n- 当 proxy 的 SQLite/stream 首字节问题修复后，是否用同一单题预算重跑两笔 transport smoke test？"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-10T00:10:00+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline_metrics": [
+        {
+          "metric_id": "baseline_recall",
+          "value": 0.5624441101636399,
+          "comparison_value": 0.017176241158193956,
+          "delta": -0.545267869005446,
+          "label": "traditional hybrid RAG"
+        },
+        {
+          "metric_id": "v2_recall",
+          "value": 0.017176241158193956,
+          "comparison_value": 0.5624441101636399,
+          "delta": -0.545267869005446,
+          "label": "v2 warm sequential"
+        },
+        {
+          "metric_id": "default_coverage",
+          "value": 0.014521252458024504,
+          "comparison_value": 96,
+          "delta": null,
+          "label": "default sample projection"
+        },
+        {
+          "metric_id": "replay_read",
+          "value": 0.0,
+          "comparison_value": 1.0,
+          "delta": null,
+          "label": "v2 replay readout"
+        }
+      ],
+      "pipeline_metrics": [
+        {
+          "pipeline": "traditional hybrid RAG",
+          "query_count": 2161,
+          "precision_at_5": 0.1289217954650625,
+          "recall_at_5": 0.5624441101636399,
+          "mrr": 0.4594632114761685,
+          "ndcg_at_5": 0.4712349389820677,
+          "sample_budget": null,
+          "sample_coverage": null
+        },
+        {
+          "pipeline": "v2 warm sequential",
+          "query_count": 2161,
+          "precision_at_5": 0.004720037019898196,
+          "recall_at_5": 0.017176241158193956,
+          "mrr": 0.01699830325466605,
+          "ndcg_at_5": 0.015156047911559216,
+          "sample_budget": 96,
+          "sample_coverage": 0.014521252458024504
+        }
+      ],
+      "capacity_curve": [
+        {
+          "sample_budget": 32,
+          "coverage": 0.004840417486008168,
+          "precision_at_5": 0.0015733456732993985,
+          "recall_at_5": 0.005387393272903794,
+          "mrr": 0.007635354002776492,
+          "ndcg_at_5": 0.005774007054351078
+        },
+        {
+          "sample_budget": 96,
+          "coverage": 0.014521252458024504,
+          "precision_at_5": 0.004720037019898196,
+          "recall_at_5": 0.017176241158193956,
+          "mrr": 0.01699830325466605,
+          "ndcg_at_5": 0.015156047911559216
+        },
+        {
+          "sample_budget": 192,
+          "coverage": 0.029042504916049008,
+          "precision_at_5": 0.007403979639055993,
+          "recall_at_5": 0.02759602684201862,
+          "mrr": 0.02590621625790529,
+          "ndcg_at_5": 0.02318188708447724
+        },
+        {
+          "sample_budget": 512,
+          "coverage": 0.07744667977613069,
+          "precision_at_5": 0.013512262841277187,
+          "recall_at_5": 0.05669613258814165,
+          "mrr": 0.04015887706308808,
+          "ndcg_at_5": 0.04222353047339345
+        },
+        {
+          "sample_budget": 1024,
+          "coverage": 0.15489335955226138,
+          "precision_at_5": 0.028042572882924575,
+          "recall_at_5": 0.11860517789403481,
+          "mrr": 0.07608360327009099,
+          "ndcg_at_5": 0.08262643028316029
+        },
+        {
+          "sample_budget": 2048,
+          "coverage": 0.30978671910452277,
+          "precision_at_5": 0.042665432670060156,
+          "recall_at_5": 0.1837652321456116,
+          "mrr": 0.10059386086688261,
+          "ndcg_at_5": 0.11702407999370276
+        },
+        {
+          "sample_budget": 4096,
+          "coverage": 0.6195734382090455,
+          "precision_at_5": 0.058306339657565945,
+          "recall_at_5": 0.25930510566095943,
+          "mrr": 0.14146999845750424,
+          "ndcg_at_5": 0.16608709722733098
+        }
+      ],
+      "write_outcomes": [
+        {
+          "metric_order": 1,
+          "observation": "exact self-hit after write",
+          "traditional": 1.0,
+          "v2": null,
+          "case_count": 64
+        },
+        {
+          "metric_order": 2,
+          "observation": "event log contains write",
+          "traditional": null,
+          "v2": 1.0,
+          "case_count": 64
+        },
+        {
+          "metric_order": 3,
+          "observation": "raw event text returned",
+          "traditional": null,
+          "v2": 0.0,
+          "case_count": 64
+        },
+        {
+          "metric_order": 4,
+          "observation": "replay reads expected anchor",
+          "traditional": null,
+          "v2": 0.0,
+          "case_count": 32
+        }
+      ]
+    }
+  }
+}

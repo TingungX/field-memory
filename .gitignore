@@ -20,3 +20,16 @@ memory_state/
 # Playwright debug artifacts
 .playwright-cli/
 frontend/out/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Codex validation logs
+/.codex/logs/
+
+# Reproducible v2 feasibility outputs
+/experiments/v2_feasibility/dataset_scale.json
+/experiments/v2_feasibility/results*.json
+/experiments/v2_feasibility/llm_smoke*.json
+/experiments/v2_feasibility/*.npz

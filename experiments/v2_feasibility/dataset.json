@@ -1,0 +1,62 @@
+{
+  "dataset_id": "field-memory-v2-feasibility-2026-08-09",
+  "description": "Controlled memory stream for comparing a conventional hybrid RAG retriever with an observational v2 field skeleton.",
+  "language": "English",
+  "embedding": {
+    "provider": "ollama",
+    "url": "http://127.0.0.1:11434/api/embed",
+    "model": "bge-m3",
+    "dimension": 1024
+  },
+  "memories": [
+    {"id":"m01","topic":"engineering","date":"2026-07-01","seed_hits":4,"text":"The user prefers Rust for long-lived backend services and uses Python mainly for scripts."},
+    {"id":"m02","topic":"engineering","date":"2026-07-02","seed_hits":4,"text":"The user values semantic consistency and long-term plans more than novelty."},
+    {"id":"m03","topic":"design","date":"2026-07-03","seed_hits":3,"text":"The user's preferred signature accent is warm orange, around #C9633A."},
+    {"id":"m04","topic":"design","date":"2026-07-03","seed_hits":3,"text":"The user dislikes emoji in product interfaces and prefers icons."},
+    {"id":"m05","topic":"design","date":"2026-07-04","seed_hits":3,"text":"For mobile layouts, the user prefers a bottom tab bar with overlay panels."},
+    {"id":"m06","topic":"operations","date":"2026-07-05","seed_hits":4,"text":"Production changes should run in an isolated worktree and must never interrupt the live service."},
+    {"id":"m07","topic":"v1-physics","date":"2026-07-06","seed_hits":3,"text":"The field-memory v1 core defines impact as cosine similarity times the square root of anchor density."},
+    {"id":"m08","topic":"v1-physics","date":"2026-07-06","seed_hits":3,"text":"In field-memory v1, RelaxationCycle::run is the only evolution entry point."},
+    {"id":"m09","topic":"v2-ontology","date":"2026-07-07","seed_hits":4,"text":"The v2 design treats the field as the sole ontology and anchors as a storage projection."},
+    {"id":"m10","topic":"v2-ontology","date":"2026-07-07","seed_hits":3,"text":"The v2 design introduces transient sample points as an interaction projection that is not persisted."},
+    {"id":"m11","topic":"v2-dynamics","date":"2026-07-08","seed_hits":3,"text":"The v2 design wants influence to travel through sample points in a chain rather than broadcast independently to every anchor."},
+    {"id":"m12","topic":"v2-dynamics","date":"2026-07-08","seed_hits":3,"text":"In v2, perturb(query) is intended to be both a readout and a write to the field."},
+    {"id":"m13","topic":"v2-dynamics","date":"2026-07-08","seed_hits":2,"text":"The v2 design explicitly removes paradigm-shift machinery, shadow anchors, and SeedConcept."},
+    {"id":"m14","topic":"v2-open","date":"2026-07-09","seed_hits":2,"text":"The v2 design leaves sample generation, neighborhood trends, attenuation, readout, event retention, and bincode migration unspecified."},
+    {"id":"m15","topic":"current-code","date":"2026-07-10","seed_hits":4,"text":"The current repository still implements v1 RelaxationCycle, paradigm.rs, SeedConcept, and ImpactTrace."},
+    {"id":"m16","topic":"current-code","date":"2026-07-10","seed_hits":2,"text":"The current frontend build is broken because ChatPanel imports MessageList after that file was deleted."},
+    {"id":"m17","topic":"current-code","date":"2026-07-10","seed_hits":2,"text":"The Rust tests pass, but integration tests using DummyEmbedProvider are ignored because hash embeddings are not semantic."},
+    {"id":"m18","topic":"runtime","date":"2026-08-09","seed_hits":3,"text":"The local LLM proxy exposes test-model at 127.0.0.1:4000."},
+    {"id":"m19","topic":"runtime","date":"2026-08-09","seed_hits":3,"text":"The local Ollama server exposes bge-m3 embeddings at 127.0.0.1:11434."},
+    {"id":"m20","topic":"experiment","date":"2026-08-09","seed_hits":3,"text":"The feasibility experiment should conserve model calls and must not use the LLM as a data scorer."},
+    {"id":"m21","topic":"rag-baseline","date":"2026-08-01","seed_hits":2,"text":"A conventional RAG memory stores text chunks with embeddings and retrieves top-k neighbors without changing field state."},
+    {"id":"m22","topic":"rag-baseline","date":"2026-08-02","seed_hits":2,"text":"Mem0 uses an LLM to extract memories and a vector store to persist and search them; Qdrant can also support keyword search."},
+    {"id":"m23","topic":"documentation","date":"2026-08-03","seed_hits":2,"text":"A memory query about the current architecture should prefer the newer v2 design note over the older v1 architecture description."},
+    {"id":"m24","topic":"experiment","date":"2026-08-09","seed_hits":3,"text":"The user has not accepted v2 as the production architecture; this experiment is observational."},
+    {"id":"m25","topic":"runtime","date":"2026-06-14","seed_hits":1,"text":"An older README documented port 3000 for the server and browser UI."},
+    {"id":"m26","topic":"runtime","date":"2026-08-09","seed_hits":4,"text":"The current server source uses port 5100 by default, while the proxy used for this experiment is on port 4000."},
+    {"id":"m27","topic":"v2-time","date":"2026-07-07","seed_hits":3,"text":"The v2 design replaces wall-clock relaxation windows with event steps: each event advances the field by one step."},
+    {"id":"m28","topic":"v2-persistence","date":"2026-07-07","seed_hits":3,"text":"In v2, the persistent field state is intended to be the anchor set; sample points are regenerated and are not persisted."},
+    {"id":"m29","topic":"rag-baseline","date":"2026-08-02","seed_hits":2,"text":"A conventional RAG read is non-mutating: it embeds a query, ranks stored chunks, and returns context without changing stored vectors."},
+    {"id":"m30","topic":"current-code","date":"2026-07-10","seed_hits":3,"text":"The current v1 recall path broadcasts a query to anchors, ranks by impact, and follows ImpactTrace records back to event text."}
+  ],
+  "write_tests": [
+    {"id":"w01","date":"2026-08-09","text":"The user repeats that warm orange and linear icons should remain the visual language.","expected_anchor_ids":["m03","m04"]},
+    {"id":"w02","date":"2026-08-09","text":"Every feasibility run must record both the memory write and the memory read as observable operations.","expected_anchor_ids":[],"novel":true},
+    {"id":"w03","date":"2026-08-09","text":"The v2 design should be validated before any production rewrite is accepted.","expected_anchor_ids":["m14","m24"]}
+  ],
+  "queries": [
+    {"id":"q01","text":"What visual language does the user prefer for interfaces?","relevant_ids":["m03","m04","m05"],"answer_keywords":["orange","icon","bottom tab"]},
+    {"id":"q02","text":"How should risky production deployments be handled?","relevant_ids":["m06"],"answer_keywords":["isolated","worktree","interrupt"]},
+    {"id":"q03","text":"In v2, what is persistent and what is only an interaction projection?","relevant_ids":["m09","m10","m28"],"answer_keywords":["field","anchor","sample","persist"]},
+    {"id":"q04","text":"How does v2 propagate influence, and what does a perturbation do?","relevant_ids":["m11","m12","m27"],"answer_keywords":["chain","sample","readout","write","event"]},
+    {"id":"q05","text":"Why is v2 not ready to implement immediately?","relevant_ids":["m14","m24"],"answer_keywords":["unspecified","open","observational"]},
+    {"id":"q06","text":"What memory engine is actually implemented in the repository today?","relevant_ids":["m08","m15","m30"],"answer_keywords":["RelaxationCycle","SeedConcept","ImpactTrace","broadcast"]},
+    {"id":"q07","text":"Which port is the current server using, rather than the old README?","relevant_ids":["m26"],"answer_keywords":["5100"]},
+    {"id":"q08","text":"What is the core impact equation in v1?","relevant_ids":["m07"],"answer_keywords":["cosine","square root","density"]},
+    {"id":"q09","text":"How does a conventional RAG memory store and retrieve information?","relevant_ids":["m21","m22","m29"],"answer_keywords":["embedding","vector","top-k","non-mutating"]},
+    {"id":"q10","text":"Which local service should generate the experiment embeddings?","relevant_ids":["m19"],"answer_keywords":["Ollama","bge-m3","11434"]},
+    {"id":"q11","text":"Does v2 memory recall change the field, unlike conventional RAG?","relevant_ids":["m12","m29"],"answer_keywords":["readout","write","mutat","non-mutating"]}
+  ],
+  "llm_eval_queries": ["q03", "q05", "q07"]
+}
