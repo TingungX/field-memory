@@ -1,5 +1,15 @@
 # DSE-Memory 架构设计文档 (v2 — 统一势能场)
 
+Status: superseded
+Owner: field-memory
+Last updated: 2026-08-12
+Scope: 冻结的 v1 Anchor/impact 实现设计；历史标题中的 “v2” 不再表示当前 field-memory v2
+Related code: `crates/core/field-mem-core`
+Superseded by: [field-memory v2 理论基石](design/field-memory-v2-foundations.md)
+
+> 本文保留现有 v1 实现的历史设计，不是当前 v2 规范。v2 不沿用本文的
+> AnchorKey、impact、stiffness/damping 或 RelaxationCycle 路径。
+
 > Dynamic Semantic Evolutionary Memory
 > 2026-06-13 — clean-slate revision
 
@@ -495,4 +505,3 @@ broadcast → anchors 算 impact      relax_cycle.run()
 ### 一句话
 
 > **没有判断，没有分类。事件是石子投入水中，涟漪自会找到形状。**
-

@@ -33,3 +33,6 @@ __pycache__/
 /experiments/v2_feasibility/results*.json
 /experiments/v2_feasibility/llm_smoke*.json
 /experiments/v2_feasibility/*.npz
+
+# Reproducible v2 dimension-fidelity outputs
+/experiments/v2_dimension_fidelity/artifacts/

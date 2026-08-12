@@ -1,8 +1,29 @@
 # AGENTS.md — field-memory
 
-## 场的核心原则
+## 0. 设计权威与版本边界
 
-这些原则是 field-memory 的**宪法**——不可动摇，任何修改必须与它们自洽。违反这些原则的"修复"不是修复，是背叛。
+field-memory v2 是当前理论与后续实现的唯一权威方向。v2 采用
+`EventCoordinate -> DensitySite -> Density -> Sample -> Response -> EventCoordinate`
+因果链；它与现有 Anchor/impact/RelaxationCycle 路径没有继承或渐进改造关系。
+
+- v2 的当前理论权威是 `docs/design/field-memory-v2-foundations.md`；已接受的
+  版本边界、分辨率与维度决策见
+  `docs/decisions/2026-08-12-v2-authority-resolution-and-dimension.md`。
+- 现有 `crates/core/field-mem-core` 及下文 Anchor/impact 规则属于冻结的 v1
+  实现，只允许维护，不得据此约束或补全 v2。
+- v2 必须使用独立模块、状态和持久化版本；不得把 v1 的 Anchor、density
+  字段、`impact()`、stiffness/damping 或 `RelaxationCycle` 搬入 v2。
+- 在 `docs/specs/field-memory-v2-implementation-contract.md` 存在且标记为
+  `Status: accepted` 之前，不得开始 v2 动力学框架实现。
+
+## v1 冻结实现的维护原则
+
+以下原则只约束现有 v1 路径的维护。它们曾是 v1 的“宪法”，但不是 v2
+的设计输入；违反这些原则的 v1 “修复”不是修复，也不能以遵守它们为由
+阻止 v2 的独立设计。
+
+从本标题开始直到本文末尾的设计意图、文件结构、工程规约、测试规约与已记录
+教训，均是现有 v1 路径的冻结历史资料；它们不能约束、补全或批准 v2。
 
 ### 1. 记忆是场的状态，不是任何主体的属性
 
@@ -44,7 +65,7 @@ impact(anchor, event) = cos_sim(anchor.direction, event.direction) × √density
 
 init 可以多次调用。每次追加 40-60 个锚点到已有场上。新锚点与已有锚点之间自然产生 impact 关系。场是逐步增长的多元地形，没有人工上限——LLM 觉得这个领域有 80 个维度就 80 个。5-10 个"我喜欢橙色"式的锚点不是场，是 hashmap 的糟糕实现。
 
-## 设计意图
+## v1 冻结实现：设计意图
 
 field-memory 抛弃了"向量数据库 + RAG"的传统路线。核心立场是：
 
@@ -61,7 +82,7 @@ impact(anchor, event) = cos_sim(anchor.direction, event.direction) * sqrt(anchor
 
 范式转移、ECG、召回、持久化全部由此推导。
 
-## 核心元素
+## v1 冻结实现：核心元素
 
 | 结构体 | 角色 | 关键字段 |
 |---|---|---|
@@ -79,7 +100,7 @@ damping   = sqrt(density)    # 高密度 → 强恢复力（抵抗漂移，核�
 
 两者都随密度增长，但效果相反：stiffness 驱动锚点朝扰动方向移动（push），damping 把它拉回之前的位置（pull）。高密度锚点既响应强烈，又拒绝永久漂移——这是场的自稳机制。
 
-## 文件结构
+## v1 冻结实现：文件结构
 
 ```
 field-memory/
@@ -105,7 +126,7 @@ field-memory/
 
 核心引擎 `field-mem-core` 保持纯粹，不引入任何 HTTP、前端、鉴权、业务逻辑。外挂模块通过 Cargo workspace 引用核心，各自独立演进。
 
-## 设计亮点
+## v1 冻结实现：设计亮点
 
 | 亮点 | 说明 |
 |---|---|
@@ -117,14 +138,14 @@ field-memory/
 | 范式转移 = 唯一结构变换 | shadow_anchor 保留完整快照，恢复无损 |
 | 5 个参数 | 向量维度、时间窗口、阻尼基数、刚度基数、收敛阈值 |
 
-## 工程规约
+## v1 冻结实现：工程规约
 
 - **5 个配置参数** — `DseCoreParams` 只增不减需要计划更新。
 - **一文件一职责** — 不跨模块泄漏职责。
 - **`engine.rs` 只做编排** — 算法改动在 `physics.rs` / `cycle.rs` / `recall.rs`。
 - **工具两件套** — `init_field`（构建场）、`recall_memory`（召回），无其他。`seed_memory` 和 `associate_memory` 已废除。
 
-### 前端规约
+### v1 前端规约
 
 - **React + Next.js (static export)** — 使用 React 组件 + Next.js App Router，禁止手写 DOM 操作。
 - **CSS Modules + CSS 变量** — 每个组件使用 `.module.css`，共享样式在 `globals.css` 中定义 CSS 变量。
@@ -137,13 +158,13 @@ field-memory/
 - **不使用 emoji，倾向于 icon 而非文字标签**。
 - **面板折叠** — 侧栏面板通过 CSS transition 实现折叠，`collapsed` clsas 设置 `width: 0; padding: 0; border: none; margin: 0; opacity: 0; pointer-events: none`。
 
-## 测试规约
+## v1 冻结实现：测试规约
 
 - **内联 `#[cfg(test)] mod tests`** — 单元测试和实现写在一起。
 - **`tests/integration.rs`** — 跨模块端到端测试。
 - **依赖 `DummyEmbedProvider` 的测试天然不稳定** — 标记 `#[ignore]` 并写注释。
 
-## 已记录教训
+## v1 冻结实现：已记录教训（历史）
 
 1. **`lib.rs` 的 re-export 不可引用不存在的模块**。先做骨架或推迟 re-export。
 2. **`bincode 1.x` 中 `bincode::Error` 是 `Box<bincode::ErrorKind>`**。改用 `Serialization(String)` 手动 map。

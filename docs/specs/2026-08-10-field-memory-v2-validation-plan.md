@@ -2,10 +2,10 @@
 
 Status: draft
 Owner: field-memory
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 Scope: v2 的 DensitySite、density、Sample、守恒运输、Response 反馈与事件步验证；不验证旧 v1 引擎或 retrieval 质量
 Related code: 计划中的 `crates/core/field-mem-core` v2 实现与其测试；当前尚无实现
-Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
+Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
 
 ## 1. 目的与边界
 
@@ -17,9 +17,9 @@ Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 
 EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoordinate.
 \]
 
-尤其不允许为了让测试通过而让外部扰动、DensitySite、原始 density、CoordinateLog 或 EventContent 直接改写 EventCoordinate。测试中的 fixture 可以使用低维球面和合成 density；这不是将低维 fixture 当作生产场，而是使不变量有可精确判定的参考解。
+尤其不允许为了让测试通过而让外部扰动、DensitySite、原始 density、CoordinateLog 或 EventContent 直接改写 EventCoordinate。测试中的 `physics_reference_s2` backend 固定使用 \(S^2\) 与合成 density；这不是将三维环境向量当作生产场，而是使不变量有可精确判定的参考解。生产维度必须先通过独立真实 embedding 保真实验，不能由本计划的物理测试倒推。
 
-本轮只定义验证方案，不新增测试代码、不运行测试，也不把任何待实现的离散公式伪装成已确认理论。
+本计划只定义 v2 动力学验证方案，不把任何待实现的离散公式伪装成已确认理论。生产维度实验使用独立 runner、artifact 与结论，不混入 Phase 0–4。
 
 ## 2. 术语、观测量与通过规则
 
@@ -29,8 +29,8 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 
 | 量 | 记号 | 含义 | 不是什么 |
 |---|---:|---|---|
-| DensitySite 数 | \(N_{site}=|C_{t,\ell}|\) | 在角尺度 \(\ell\) 下可区分的当前几何单位数 | Event 行数或 Content 重数 |
-| Sample 数 | \(K=|S_{t,\ell,K}|\) | 本次交互场的离散分辨率/硬件预算 | 场的绝对 density 或参与单位数 |
+| DensitySite 数 | \(N_{site}=|C_{t,K}|\) | 当前几何在 \((K,X_t)\) 派生尺度下的可区分单位数 | 独立配置、Event 行数或 Content 重数 |
+| Sample 预算 | \(K\) | 场版本的物理分辨率上限；实际 \(|S_{t,K}|\le K\) | 可按负载改变的硬件旋钮、绝对 density 或参与单位数 |
 | Sample 结构权重 | \(w_{src,j}=m_j/\mathcal M\) | Sample \(j\) 在本相冻结场中代表的绝对结构份额，\(\mathcal M=\sum_jm_j\)；规范化当前场中 \(\mathcal M=N_{site}\) | Response 回分配份额或 Event 行数 |
 | 有效参与度 | \(N_{eff}=1/\sum_i r_i^2\) | 本次 closed Response 回分配到几何单位的集中程度，\(r_i=a_i/\sum_k a_k\) | raw Event 数、K、Nsite 或 source weight |
 
@@ -51,7 +51,7 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 
 ### 2.3 需要的标准 fixtures
 
-固定 seed 生成并版本化以下 fixture family；每个 fixture 以名称、维度、\(\ell\)、坐标、density 参数和 seed 表示，而非只有随机生成代码。
+固定 seed 生成并版本化以下 fixture family；每个 fixture 以名称、维度、\(K\)、坐标、density 参数和 seed 表示，并记录由 \(\mathcal G_K\) 得到的 `derived_scale`，不得把它作为输入参数。
 
 | family | 用途 |
 |---|---|
@@ -62,8 +62,8 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 | `uniform_shell` | 常 density、精确细分不变性与 K 检验 |
 | `local_cluster` | 作用点附近高 density、远区低 density的局部性 |
 | `rotated_copy` | 对每个非平凡 fixture 施加固定正交旋转后的副本 |
-| `large_balanced` | 64 至 1,024 个均衡结构单位，用于 \(N_{eff}\) 与大场位移律 |
-| `large_skewed` | 同样的 Nsite/K 但 Response 集中，用来证明 Nsite 或 K 不可替代 \(N_{eff}\) |
+| `large_balanced` | K=64 至 1,024 的分辨率版本；实际结构单位数由 \(\mathcal G_K\) 与当前几何导出，用于 \(N_{eff}\) 与大场位移律 |
+| `large_skewed` | 同一 K 版本、输入几何与派生 Nsite，但 Response 集中，用来证明 Nsite 或 K 不可替代 \(N_{eff}\) |
 
 随机 fixture 只能补充这些确定性 fixture，不能替代它们。所有随机测试使用同一 PRNG 算法、固定 `FM_V2_SEED` 和显式派生子 seed；失败时打印可单独重放的 seed。
 
@@ -71,17 +71,23 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 
 ### 3.1 前置条件与实现就绪门禁
 
-本文是验证计划，不是可直接执行的 implementation handoff。开始编写 v2 框架前，固定路径 `docs/specs/field-memory-v2-implementation-contract.md` 必须存在且标记为 `Status: accepted`，并至少冻结：v1/v2 共存与 crate/module/file manifest；`f64`/维度/尺度/单位；\(\mathcal C_\ell\)、\(\mathcal D_\ell\)、\(\mathcal P_K\) 的唯一算法及 tie-break；coverage/volume/quadrature/coupling；唯一离散 transport 与连续 reference；readout 与只读 initialization readiness probe；版本化 fixture 数据与全部容差；artifact schema、runner target 和精确命令。
+implementation contract 的 artifact schema 还必须同时冻结 `backend_kind`、`space_kind`、embedding/projection provenance 与生产/参考空间互斥校验。
+
+本文是验证计划，不是可直接执行的 implementation handoff。开始编写 v2 框架前，固定路径 `docs/specs/field-memory-v2-implementation-contract.md` 必须存在且标记为 `Status: accepted`，并至少冻结：独立 v2 crate/module/file manifest 与持久化版本；`f64`/生产维度/单位；\(\mathcal G_K\)、\(\mathcal C_{\ell_t^K}\)、kernel density、\(\mathcal P_K\) 的唯一算法及 tie-break；coverage/volume/quadrature/coupling；唯一离散 transport 与连续 reference；readout 与 `Building | Active` readiness probe；版本化 fixture 数据与全部容差；artifact schema、runner target 和精确命令。不得重新讨论 v1/v2 是否共用路径，也不得暴露独立 runtime \(\ell\)。
 
 若该 accepted 契约不存在，任何实施代理——无论能力强弱——都必须返回 `blocked:implementation-contract-missing`。若文件存在但 status 不正确、任一必需章节/数值/schema/命令缺失，或者契约内部与本理论、验证计划冲突，则返回 `blocked:implementation-contract-incomplete`。此时只允许搭建不含算法选择的数学 primitive、账本数据类型或验证器骨架；不得自行选默认公式、用 TODO/ignore 把阶段伪装成完成，或宣布 Phase 0 已可运行。架构选择不能由实施者写进“测试 README”后自行批准。
 
-在开始 Phase 0 前，实施者必须从 accepted contract 逐项核对并原样镜像到测试 README：DensitySite 构造器、density estimator、Sample coverage/volume 生成器、离散运输/吸收实现、Response 回分配，以及自然坍缩与外界反坍缩的 phase contract；同时记录契约文件的 SHA-256。实施者不得新增、修改或“合理化”其中的选择。外界 readout 在外界 Response 形成后、该相 scatter/Exp 反馈前完成；两相更新结束后，才在外界作用点 \(q\) 原位 append Event。若任一项尚未决定或测试 README 与契约 hash/内容不一致，必须按上述 incomplete 状态停止；不得用临时默认参数跨阶段推进。
+在开始 Phase 0 前，实施者必须从 accepted contract 逐项核对并原样镜像到测试 README：K-to-scale 分辨率算子、DensitySite 构造器、kernel density、Sample coverage/volume 生成器、同核 coupling、离散运输/吸收实现、Response 回分配，以及自然坍缩与外界反坍缩的 phase contract；同时记录契约文件的 SHA-256。实施者不得新增、修改或“合理化”其中的选择。外界 readout 在外界 Response 形成后、该相 scatter/Exp 反馈前完成；两相更新结束后，才在外界作用点 \(q\) 原位 append Event。若任一项尚未决定或测试 README 与契约 hash/内容不一致，必须按上述 incomplete 状态停止；不得用临时默认参数跨阶段推进。
+
+生产 backend 还必须引用一个通过 [生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md) 校验的 formal artifact，并冻结 embedding model digest、投影 bundle hash 与目标维度。没有通过候选时只能实现 `physics_reference_s2` backend，不能把它标为生产语义空间。
+所有 artifact schema 还必须包含 `backend_kind` 与 `space_kind`：物理验证固定为 `backend_kind=physics_reference`、`space_kind=physics_reference_s2`；语义生产 artifact 必须记录 embedding/projection provenance，不能用缺少这些字段的 \(S^2\) artifact 冒充生产空间。
 
 测试 harness 必须提供以下稳定接口（名称可按 Rust 模块风格调整，但语义不可缺失）：
 
 ```text
-build_sites(events, scale) -> DensitySites
-fit_density(sites, scale) -> Density
+derive_resolution(events, K) -> DerivedResolution
+build_sites(events, derived_resolution) -> DensitySites
+fit_density(sites, derived_resolution) -> Density
 project_samples(density, K) -> SampleField
 run_transport(sample_field, source) -> TransportResult
 apply_event_step(state, external_event?) -> EventStepResult
@@ -99,7 +105,7 @@ a_j=I_0\frac{a_{raw,j}}{A_{raw}},\qquad
 
 ### 3.2 一次只运行一个阶段
 
-禁止 `cargo test` 全量并行、禁止同时跑两个 scale、禁止把 benchmark 与性质测试并发运行。阶段顺序固定：
+禁止 `cargo test` 全量并行、禁止同时跑两个 K 场版本、禁止把 benchmark 与性质测试并发运行。阶段顺序固定：
 
 1. Phase 0：解析、结构与性质测试；
 2. Phase 1：单机制测试；
@@ -151,17 +157,17 @@ export RAYON_NUM_THREADS=1
 |---|---|---|---|
 | P0-01 | 状态解析/归一化 | 所有 fixture 及持久化 round-trip | Coordinate 都为有限单位向量；Content 未被修改；非法维度、NaN、负 density 显式报错 |
 | P0-02 | DensitySite 去重 | 同一 Coordinate 上挂 1、2、N 个不同 Content | `N_site`、site geometry、density、Sample field 完全相同；可读 Content 集合增加 |
-| P0-03 | 尺度单调 | 同一支撑集上从粗 \(\ell\) 缩小到细 \(\ell\) | `N_site` 不下降；所有 site 有可审计的前后映射 |
+| P0-03 | K 派生尺度单调 | 同一支撑集上按 K=64/128/256/512 构建不同分辨率场版本 | K 增大时 `derived_scale` 只变细或不变、`N_site` 不下降、重建/离散误差不增；每个 site 有可审计的跨版本映射；API 无独立 scale 输入 |
 | P0-04 | 全空间/coverage | 从非空 sparse field 生成 Sample；另直接构造 `vacuum_transport` SampleField | \(\phi_j\ge0\)、\(\sum_j\phi_j=1\) 于所有验证点；非空场中无 Event 的方向仍有 coverage；\(V_j>0\) 且 \(\sum_jV_j=|\mathcal D|\)。`empty` 必须返回初始化未完成，不能用未定义的 \(p=\rho/M\) 生成正常 Sample |
-| P0-05 | density 单位协变与 K 独立 | 在脱离正常 \(\rho=M p\) 规范的隔离测试中同时缩放 \(\rho,\mu_i,m_j,c_{ji}\mapsto c(\cdot)\)，各取 K=64/128/256 | 明确标记该变换不是同一 `N_site` 的另一正常物理状态；Sample geometry 只随相对 \(p\) 改变，责任比例不变；恢复规范后 \(\int\rho=N_{site}\)；`N_site` 不随 K 改变 |
-| P0-06 | K 不变性的正确边界 | `uniform_shell` 与 `local_cluster` 的 K 梯度 | 均匀 density 下 raw transport 与 closed Response 精确一致；非均匀 density 不要求不同有限 K 的 Response 相同，只要求每 K 的 raw 与 closed 账本闭合、最大 Sample 直径和 density/测地积分误差不增，并向连续 reference 收敛 |
+| P0-05 | density 单位协变 | 在脱离正常 \(\rho=M p\) 规范的隔离测试中同时缩放 \(\rho,\mu_i,m_j,c_{ji}\mapsto c(\cdot)\)，固定一个 K 场版本 | 明确标记该变换不是另一个合法正常物理状态；Sample geometry 与 `derived_scale` 不变、责任比例不变；恢复规范后 \(\int\rho=N_{site}\) |
+| P0-06 | K 模型族的正确边界 | `uniform_shell` 与 `local_cluster` 的 K=64/128/256/512 梯度 | 不要求不同 K 的 Response 同值；每个 K 版本各自 raw/closed 闭合，K 增大时派生尺度、最大 Sample 直径和 density/测地积分误差不增，并向连续极限收敛；报告而不伪造“同一物理场细化” |
 | P0-07 | 旋转等变 | 旋转 EventCoordinate、作用点和所有可旋转输入 | 对无连续对称性的 fixture，sites 与 SampleField 在允许的稳定置换后只做同一旋转；density probe、coverage 重建、标量 Response、方向矩及更新坐标满足相同等变关系。对 `uniform_shell` 等具有连续稳定子群的 fixture，不比较任意有限 Sample 中心，而比较重建场与可观测量在对称群下不变；误差不超过 `ε_angle` |
 | P0-08 | 当前态充分性 | 相同当前 Coordinate/Content、不同 CoordinateLog/history | 从 DensitySite 至 EventStepResult 的所有数值与 phase trace 相同 |
 | P0-09 | Sample 充分性/中介性 | 生成同一 SampleField 后改变不可见原始 density/sites；审计函数调用 | transport 结果不变，且 transport 的依赖图只读取 SampleField 与 source |
 | P0-10 | coupling 可行性 | 对所有标准 fixture 构造带局部支撑的 \(c_{ji}\) | 非负 coupling 同时满足几何单位边缘 \(\mu_i\) 与 Sample 边缘 \(m_j\)；若给定 coverage 下不可行，必须显式失败并报告违反的集合/边缘，不能退化成非局部或不守恒 fallback |
 | P0-11 | 初始化门禁 | `empty`、`single_site`、未达门槛的 skewed 场与满足预注册门槛的 `large_balanced` | 未完成初始化的状态不得进入正常两相事件步；达到基于代表性作用点 `N_eff`/集中度的冻结门槛后才允许进入，且不得通过运行期阻尼或降低预算绕过门禁 |
 
-P0-06 的用意是避免把理论没有承诺的“任意有限 K 完全同值”误报为缺陷，也避免把收敛不足伪装成 K 不变。每个 K、每个 phase 下必须单独验证 raw 账本
+P0-06 的用意是避免把不同 K 场版本误报成同一物理状态，也避免用“模型族不同”掩盖内部不守恒。每个 K、每个 phase 下必须单独验证 raw 账本
 
 \[
 \left|I_0-I_{res}-\sum_j a_{raw,j}\right|\le\varepsilon_{abs},
@@ -223,21 +229,26 @@ snapshot current EventCoordinates
 
 ### 7.1 规模矩阵
 
-所有规模点使用相同 dimension、\(\ell\)、fixture family、source 强度和固定 seed。`large_balanced` 与 `large_skewed` 都要运行，避免把更多 Sample 或更多 site 错当成更广参与。
+所有规模点使用相同 reference dimension、fixture family、source 强度和固定
+seed；`physics_reference_s2` 是唯一物理 reference backend，\(K\) 是唯一外部指定的分辨率版本，`derived_scale` 与 `N_site` 必须由
+当前几何导出。`large_balanced` 与 `large_skewed` 都要运行，避免把更大的 K
+或更多 site 错当成更广参与。
 
-| tier | Nsite | K | 预期 Neff 情形 | 目的 |
-|---|---:|---:|---|---|
-| S64 | 64 | 64, 128 | balanced / skewed | 最小大场基线 |
-| S128 | 128 | 128, 256 | balanced / skewed | 分辨率与参与度分离 |
-| S256 | 256 | 256, 512 | balanced / skewed | 主趋势点 |
-| S512 | 512 | 512 | balanced / skewed | 必跑的大场上界 |
-| S1024 | 1,024 | 1,024 | balanced / skewed | 仅在 Phase 3 全通过且资源余量充足时执行 |
+| tier | K | 不同输入支撑点 | Nsite | 预期 Neff 情形 | 目的 |
+|---|---:|---:|---|---|---|
+| S64 | 64 | 256 | 运行时派生 | balanced / skewed | 最小大场基线 |
+| S128 | 128 | 512 | 运行时派生 | balanced / skewed | 分辨率版本梯度 |
+| S256 | 256 | 1,024 | 运行时派生 | balanced / skewed | 主趋势点 |
+| S512 | 512 | 2,048 | 运行时派生 | balanced / skewed | 必跑的大场上界 |
+| S1024 | 1,024 | 4,096 | 运行时派生 | balanced / skewed | 仅在 Phase 3 全通过且资源余量充足时执行 |
 
-对每个规模点，raw Event 行数还要分别取 `Nsite` 与 `2 × Nsite`（后者通过给每个 site 增加重复 Content 构成）。两者必须具有相同 Nsite、Sample field、N_eff 和动力学，借此持续检查“内容重数不是几何质量”。
+对每个规模点，raw Event 行数还要分别取“每个不同支撑点一个 Content”与
+“每个支撑点两个 Content”。两者必须具有相同 `derived_scale`、Nsite、Sample
+field、N_eff 和动力学，借此持续检查“内容重数不是几何质量”。
 
 ### 7.2 必测指标
 
-每个规模点输出：`N_site`、K、实际 Sample 最大直径、Sample density/测地积分误差、每相 raw 预算误差/残余预算、每相 closed 预算误差、`w_src`、`r_i`、`N_eff`、Response 份额的 Herfindahl 指数、近/远区贡献、每相和事件总计的平均/中位/最大角位移、每事件 wall time、峰值 RSS、artifact 大小及所有失败/跳过原因。
+每个规模点输出：`N_site`、K、`derived_scale` 及推导证据、实际 Sample 最大直径、Sample density/测地积分误差、每相 raw 预算误差/残余预算、每相 closed 预算误差、`w_src`、`r_i`、`N_eff`、Response 份额的 Herfindahl 指数、近/远区贡献、每相和事件总计的平均/中位/最大角位移、每事件 wall time、峰值 RSS、artifact 大小及所有失败/跳过原因。
 
 所有非真空 fixture 先验证一般大场上界。令每相 \(r_i=a_i/I_0\)、\(\Delta\theta_i=d(z_i,z_i')\)，则必须满足：
 
@@ -272,7 +283,10 @@ z_i'=\operatorname{Exp}_{z_i}(\mathbf P_i),
 
 S1024 不是用来掩盖 512 以下失败的重试。只有 S64、S128、S256、S512 的预算、K 收敛、局部性、动态平衡和位移律均通过，并且 wrapper 确认 S512 峰值 RSS 小于 4 GiB、wall time 小于 30 min 的 70%，才允许启动。否则 Phase 4 的 `status.json` 记 `skipped` 并附阻断 phase/指标；这不是 pass。
 
-Phase 4 依次运行 `large_balanced`、`large_skewed` 与重复 Content 对照，固定 \(N_{site}=K=1024\)，沿用 Phase 3 已冻结的 seed、容差和所有物理参数。它必须重新验证每相 raw/closed 预算、逐源自然账本、coupling 边缘、两相重建、最后落位、旋转/重复不变、每相角运动界、局部贡献分解及资源上限。不得因规模增大修改 density estimator、coverage、闭合方式或通过门槛。
+Phase 4 依次运行 `large_balanced`、`large_skewed` 与重复 Content 对照，固定
+\(K=1024\) 与 4,096 个不同输入支撑点，`derived_scale` 和 \(N_{site}\) 仍由
+运行时按同一契约导出。沿用 Phase 3 已冻结的 seed、容差和所有物理参数。
+它必须重新验证每相 raw/closed 预算、逐源自然账本、coupling 边缘、两相重建、最后落位、旋转/重复不变、每相角运动界、局部贡献分解及资源上限。不得因规模增大修改分辨率算子、kernel、coverage、闭合方式或通过门槛。
 
 Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即停止剩余 S1024 项。通过 Phase 4 只说明 1,024 规模确认通过，不得覆盖或“修复”较小规模趋势。
 
@@ -285,9 +299,12 @@ Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即�
   "schema_version": 1,
   "phase": "phase-2",
   "fixture": "local_cluster",
-  "seed": 20260810,
+ "seed": 20260810,
+  "backend_kind": "physics_reference",
+  "space_kind": "physics_reference_s2",
   "dimension": 0,
-  "scale": 0.0,
+  "embedding_provenance": null,
+  "derived_scale": {"value": 0.0, "resolution_rule": "", "geometry_sha256": ""},
   "n_event_rows": 0,
   "n_density_sites": 0,
   "sample_budget_k": 0,
@@ -307,7 +324,7 @@ Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即�
         "error": 0.0
       },
       "closed": {
-        "scale": null,
+        "closure_factor": null,
         "absorbed": null,
         "moment_l1": null,
         "scalar_scale_max_error": null,
@@ -331,12 +348,12 @@ Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即�
 }
 ```
 
-数值 0 只示意 schema，不能作为真实无数据成功。每个自然源的验证流必须逐 Sample 包含 `sample_id`、`a_raw`、`M_raw`、`a_closed` 与 `M_closed`；其 canonical SHA-256、行数和源级汇总必须一致。P0–P2 的 `sample_ledger.mode=full`，保留全部逐源压缩 sidecar。P3–P4 为避免 \(O(K^2D)\) 方向矩把验证进程本身撑爆，允许 `mode=streamed_digest`：每个源仍须在聚合前由在线 validator 逐行验证并留下独立汇总与 digest，同时对预注册的固定审计子集和任一失败源保留完整 sidecar；不能退化成只留 phase 聚合值，也不能在看到结果后挑选审计源。每个 phase 结束再运行离线 artifact validator：检查 schema、有限数值、四类规模量的定义、自然相逐源权重与子账本可重算、每个源的 `scale=I0/A_raw`、完整账本或流式验证证据中的逐 Sample 标量/方向矩缩放、聚合预算、seed、资源记录和 pass/fail 一致性。任一在线或离线 validator 失败都属于该 phase 失败。
+数值 0 只示意 schema，不能作为真实无数据成功。每个自然源的验证流必须逐 Sample 包含 `sample_id`、`a_raw`、`M_raw`、`a_closed` 与 `M_closed`；其 canonical SHA-256、行数和源级汇总必须一致。P0–P2 的 `sample_ledger.mode=full`，保留全部逐源压缩 sidecar。P3–P4 为避免 \(O(K^2D)\) 方向矩把验证进程本身撑爆，允许 `mode=streamed_digest`：每个源仍须在聚合前由在线 validator 逐行验证并留下独立汇总与 digest，同时对预注册的固定审计子集和任一失败源保留完整 sidecar；不能退化成只留 phase 聚合值，也不能在看到结果后挑选审计源。每个 phase 结束再运行离线 artifact validator：检查 schema、有限数值、四类规模量的定义、K-to-scale 推导证据、自然相逐源权重与子账本可重算、每个源的 `closure_factor=I0/A_raw`、完整账本或流式验证证据中的逐 Sample 标量/方向矩缩放、聚合预算、seed、资源记录和 pass/fail 一致性。任一在线或离线 validator 失败都属于该 phase 失败。
 
 最终报告按 phase 给出：通过/失败/跳过、精确命令、git SHA、seed、日志目录、实际规模、最大误差、资源消耗和阻断后的最早失败项。结论必须区分：
 
 - “某个有限 K 的离散账本守恒”；
-- “K 梯度对连续参考收敛”；
+- “不同 K 分辨率模型族对连续极限收敛”；
 - “大场在实际 N_eff 下呈现 \(O(1/N_eff)\) 单位位移”；
 - “尚未验证/因失败而停止”。
 

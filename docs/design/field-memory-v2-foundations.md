@@ -2,14 +2,19 @@
 
 Status: draft
 Owner: field-memory
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 Scope: v2 的场本体、Event 表示、density、Sample、守恒运输、两相事件步与大场动力学
 Related code: 尚无；现有实现不构成本理论的约束
-Related docs: [v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
+Related docs: [v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[生产维度实验](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
 
 ## 0. 文档地位
 
 本文不是实现 spec，而是 v2 当前已经确认的定义与尚未闭合的问题清单。它先回答“系统里的东西究竟是什么”，再允许我们讨论传播、损耗、平衡和实现。本文仍为 draft；未明确列为已确认的公式不得视为定论。
+
+v2 是 field-memory 的当前理论权威；现有 Anchor/impact/RelaxationCycle 实现是
+冻结的独立 v1 路径，不参与补全本文，也不构成 v2 的兼容目标。本文中的
+开放项仍由 accepted implementation contract 阻断，不能因“v2 权威”而被
+实现者自行猜测。
 
 本文确认的结论优先于 2026-07-04 v2 草案中与之冲突的表述，尤其是：
 
@@ -38,13 +43,24 @@ Related docs: [v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-p
 
 场满足**当前态充分性**：只要两个系统的当前场相同，它们面对同一后续扰动就必须给出相同的场响应。过去只能通过已经留在当前场中的结果产生作用，不能绕过当前场再次参与计算。
 
+当前场的版本化配置包括 embedding 映射版本、环境维度 \(D\) 与 Sample
+预算 \(K\)。同一 EventCoordinate 集在不同 \(K\) 下属于不同物理分辨率的
+场版本；当前态充分性比较的“同一当前场”必须包含这些配置。
+
 因此：
 
 - 历史不是第二个隐藏的记忆系统；
 - replay、日志或时间戳不能直接改变正常交互结果；
 - 若相同的当前场因不同历史而产生不同场响应，要么当前场的表示不完整，要么实现引入了非法旁路。
 
-### 1.2 理论对象与工程表示
+### 1.2 Reference 维度与生产维度
+
+核心几何必须支持任意有限 \(D\)。\(S^2\) 仅作为三维环境向量上的严格
+reference backend，用来提供解析 coverage、volume、测地线和运输参考解；
+它不是默认生产语义空间。生产维度只能由真实 embedding 的独立保真实验
+决定，低维 reference 上的动力学通过不能替代该门禁。
+
+### 1.3 理论对象与工程表示
 
 理论上，我们关心的是当前场及其变化。工程上，我们持久化 Event 及其当前坐标，用它们拟合当前场：
 
@@ -145,39 +161,52 @@ DensitySite 不是 Sample，不承接扰动，也不产生 Response。它只负�
 
 ### 3.1 唯一合法的单相因果回路
 
-设 \(\ell\) 为 DensitySite 的角区分尺度，\(K\) 为本次交互的 Sample 预算。任意一个自然或外界相位都必须先从该相位开始时的 EventCoordinate 重建 Sample：
+设 \(K\) 为当前场版本固定的 Sample 预算。DensitySite 的角区分尺度不是
+独立输入，而由该相开始时的 EventCoordinate 几何确定性导出：
 
 \[
-C_{t,\ell}=\mathcal C_\ell(X_t)
+\ell_t^K=\mathcal G_K(X_t).
+\]
+
+任意一个自然或外界相位都必须先从该相位开始时的 EventCoordinate 重建
+完整交互面：
+
+\[
+C_{t,K}=\mathcal C_{\ell_t^K}(X_t)
 \]
 
 \[
-\rho_{t,\ell}=\mathcal D_\ell(C_{t,\ell})
+\rho_{t,K}=\mathcal D_{\ell_t^K}(C_{t,K})
 \]
 
 \[
-S_{t,\ell,K}=\mathcal P_K(\rho_{t,\ell})
+S_{t,K}=\mathcal P_K(\rho_{t,K})
 \]
 
 \[
-R_{t,\ell,K}^{\varepsilon}
+R_{t,K}^{\varepsilon}
 =\mathcal I^{\varepsilon}
-(S_{t,\ell,K},q,I_0)
+(S_{t,K},q,I_0)
 \]
 
 \[
-E_t'=\mathcal B(E_t,R_{t,\ell,K}^{\varepsilon}).
+E_t'=\mathcal B(E_t,R_{t,K}^{\varepsilon}).
 \]
 
 其中：
 
-- \(\mathcal C_\ell\)：从不同 EventCoordinate 的角几何生成 DensitySites；
-- \(\mathcal D_\ell\)：仅由 DensitySite 的相对角距离重建 density；
+- \(\mathcal G_K\)：在版本化内禀保真标准下，导出最多 \(K\) 个 Sample 可表达的最细尺度；
+- \(\mathcal C_{\ell_t^K}\)：从不同 EventCoordinate 的角几何生成 DensitySites；
+- \(\mathcal D_{\ell_t^K}\)：仅由 DensitySite 的相对角距离和派生尺度重建 density；
 - \(\mathcal P_K\)：只依据 density 的相对分布特征生成完整的 Sample 场，并把绝对 density 固化到各 Sample；
 - \(\mathcal I^{\varepsilon}\)：Sample 承接一个以 \(q\) 为作用点、预算为 \(I_0\) 的相位作用并产生 Response；\(\varepsilon=-1\) 表示自然坍缩，\(\varepsilon=+1\) 表示外界反坍缩；
 - \(\mathcal B\)：Response 反馈到 EventCoordinate，EventContent 保持不变。
 
 不存在从 Event、DensitySite、density 或外部扰动直接修改已有 EventCoordinate 的旁路。DensitySite、density 与 Sample 必须在 EventCoordinate 改变后全部重新计算；一次事件步的自然相与外界相因此不能共用同一份 Sample。完整的两相顺序见第 7 节。
+
+\(K\) 在一个 Active 场版本内固定，不能因机器负载或事件内容临时改变。
+修改 \(K\) 是显式 resolution migration，不是正常事件步，也不是对同一物理
+场的无害数值加密。
 
 ### 3.2 Sample 的完整状态与采样功能
 
@@ -208,21 +237,21 @@ V_j=\int_{\mathcal D}\phi_j(u)\,d\Omega,
 \[
 \rho_j=
 \frac{1}{V_j}
-\int_{\mathcal D}\phi_j(u)\rho_{t,\ell}(u)\,d\Omega,
+\int_{\mathcal D}\phi_j(u)\rho_{t,K}(u)\,d\Omega,
 \qquad
 m_j=\rho_jV_j.
 \]
 
-由 partition of unity 与 \(\rho=M_{t,\ell}p\) 可得：
+由 partition of unity 与 \(\rho=M_{t,K}p\) 可得：
 
 \[
 \sum_jm_j
-=\sum_j\int_{\mathcal D}\phi_j(u)\rho_{t,\ell}(u)\,d\Omega
-=\int_{\mathcal D}\rho_{t,\ell}(u)\,d\Omega
-=M_{t,\ell}.
+=\sum_j\int_{\mathcal D}\phi_j(u)\rho_{t,K}(u)\,d\Omega
+=\int_{\mathcal D}\rho_{t,K}(u)\,d\Omega
+=M_{t,K}.
 \]
 
-该等式采用正常场的规范化 \(\rho=M_{t,\ell}p\)。若只为检验单位协变性而同时做 \(\rho\mapsto c\rho\)、\(\mu_i\mapsto c\mu_i\)，则总广延量变为 \(\mathcal M=cM_{t,\ell}\)；这种变换不是“同一 \(N_{\mathrm{site}}\) 的另一个合法正常场”，只用于证明表示与回分配不依赖单位选择。
+该等式采用正常场的规范化 \(\rho=M_{t,K}p\)。若只为检验单位协变性而同时做 \(\rho\mapsto c\rho\)、\(\mu_i\mapsto c\mu_i\)，则总广延量变为 \(\mathcal M=cM_{t,K}\)；这种变换不是“同一 \(N_{\mathrm{site}}\) 的另一个合法正常场”，只用于证明表示与回分配不依赖单位选择。
 
 因此 \(m_j\) 既是 Sample 所代表的绝对结构量，也是把一个分辨率无关的场总预算分配给各 Sample 时可使用的广延权重。不能让每个 Sample 各自获得一份固定总预算，否则增加 \(K\) 会改变场的动力学。
 
@@ -232,7 +261,7 @@ Sample 不持有 Content、Event 列表或历史。Sample 间的角距离、cove
 
 ### 3.3 全方向空间仍然存在
 
-DensitySite 来自 \(X_t\)，但 \(X_t\) 不是场的边界。\(\rho_{t,\ell}\) 与后续交互必须定义在完整的 \(\mathcal D\) 上。无 Event 的方向可以具有低 density 或零 density，但不能因此成为不存在、不可采样或不可演化的禁区。
+DensitySite 来自 \(X_t\)，但 \(X_t\) 不是场的边界。\(\rho_{t,K}\) 与后续交互必须定义在完整的 \(\mathcal D\) 上。无 Event 的方向可以具有低 density 或零 density，但不能因此成为不存在、不可采样或不可演化的禁区。
 
 精确 coverage 边界没有本体地位，因此不强制采用硬 cell；但 coverage 的完整性、volume 和 density 总量必须可计算。无 Event 的方向可以由较大的 Sample 区域表示，不能因此从 Sample 场中消失。
 
@@ -246,29 +275,37 @@ DensitySite 来自 \(X_t\)，但 \(X_t\) 不是场的边界。\(\rho_{t,\ell}\) 
 
 ### 4.1 定义与边界
 
-给定角尺度 \(\ell>0\)，从 EventCoordinate 支撑集生成 DensitySites：
+给定场版本预算 \(K\) 与当前 EventCoordinate 支撑集，先导出角尺度，再生成
+DensitySites：
 
 \[
-C_{t,\ell}=\mathcal C_\ell(X_t),
+\ell_t^K=\mathcal G_K(X_t),
 \qquad
-M_{t,\ell}=|C_{t,\ell}|.
+C_{t,K}=\mathcal C_{\ell_t^K}(X_t),
+\qquad
+M_{t,K}=|C_{t,K}|.
 \]
 
-在尺度 \(\ell\) 下不可区分的 EventCoordinate 可以由一个 DensitySite 表达；超过该尺度的方向结构必须保持可区分。具体球面聚类或覆盖算法属于实现问题，理论要求：
+在派生尺度 \(\ell_t^K\) 下不可区分的 EventCoordinate 可以由一个
+DensitySite 表达；超过该尺度的方向结构必须保持可区分。具体分辨率算子、
+球面聚类或覆盖算法属于 implementation contract，理论要求：
 
 - 只使用角距离，不读取 EventContent；
 - 对完全重合的 Coordinate 去重；
 - DensitySite 不成为持久类别或第二状态；
-- 缩小 \(\ell\) 不能减少 DensitySite 数；
+- 在同一 \(X_t\) 上增大 \(K\) 只能令派生尺度变细或不变，不能减少 DensitySite 数；
 - 整体旋转 EventCoordinate 时，DensitySite 随之等变旋转。
 
 DensitySite 是“密度基点”，不保证位于 density 峰值，因此不把它解释为密度峰或物理质点。
 
 ### 4.2 相对结构与绝对结构量
 
-\(M_{t,\ell}\) 表示当前 Event 几何在尺度 \(\ell\) 下共有多少可区分的方向结构。它不是 Event 行数，也不是预先规定的总质量。
+\(M_{t,K}\) 表示当前 Event 几何在预算 \(K\) 派生尺度下共有多少可区分的
+方向结构。它不是 Event 行数，也不是预先规定的总质量。
 
-由于方向空间紧致，在任意固定非零尺度 \(\ell\) 下，\(M_{t,\ell}\) 存在几何上限。Event 可以持续增加，但完全重复或在该尺度下不可区分的 Event 不会令它无限增长。
+由于方向空间紧致，在任意派生出的非零尺度下，\(M_{t,K}\) 存在几何上限。
+Event 可以持续增加，但完全重复或在当前分辨率下不可区分的 Event 不会令
+它无限增长。
 
 ---
 
@@ -276,16 +313,17 @@ DensitySite 是“密度基点”，不保证位于 density 峰值，因此不�
 
 ### 5.1 定义边界
 
-Density 是定义在完整方向空间上的非负尺度场：
+Density 是定义在完整方向空间上的非负分辨率场：
 
 \[
-\rho_{t,\ell}:\mathcal D\rightarrow\mathbb R_{\ge0}.
+\rho_{t,K}:\mathcal D\rightarrow\mathbb R_{\ge0}.
 \]
 
-它只由 DensitySite 的相对角距离和尺度 \(\ell\) 导出，不依赖当前扰动或实际 Sample 数量 \(K\)：
+它只由 DensitySite 的相对角距离和从 \((K,X_t)\) 导出的尺度决定，不依赖
+当前扰动或 Response：
 
 \[
-\rho_{t,\ell}=\mathcal D_\ell(C_{t,\ell}).
+\rho_{t,K}=\mathcal D_{\ell_t^K}(C_{t,K}).
 \]
 
 例如可以令 \(r_k(u)\) 为方向 \(u\) 到第 \(k\) 个最近 DensitySite 的角距离，并用
@@ -295,29 +333,38 @@ Density 是定义在完整方向空间上的非负尺度场：
 \frac{k}{\Omega(B(u,r_k(u)))}
 \]
 
-估计局部 density。该式只是候选估计器，不是已确认的动力学公式。最终估计器必须满足：仅使用角几何、定义于完整方向空间、旋转等变、重复不变，并在增加 DensitySite 时收敛。
+估计局部 density。该式只是历史候选，不是当前已接受的唯一 estimator。
+当前接受的是：density 与 Sample-to-geometry coupling 必须由同一个归一化、
+旋转等变、紧支撑 kernel family 导出。kernel profile 与离散归一化仍须由
+implementation contract 冻结；它必须只使用角几何、定义于完整方向空间、
+重复不变，并在增加分辨率时具有明确极限。
 
 ### 5.2 相对形状与绝对结构量
 
-在固定尺度 \(\ell\) 下，density 分解为：
+在固定场版本预算 \(K\) 与当前态下，density 分解为：
 
 \[
-\rho_{t,\ell}(u)
+\rho_{t,K}(u)
 =
-M_{t,\ell}\,p_{t,\ell}(u),
+M_{t,K}\,p_{t,K}(u),
 \qquad
-\int_{\mathcal D}p_{t,\ell}(u)\,d\Omega=1.
+\int_{\mathcal D}p_{t,K}(u)\,d\Omega=1.
 \]
 
-- \(p_{t,\ell}\) 表达 density 在各方向的相对形状；
-- \(M_{t,\ell}=|C_{t,\ell}|\) 表达该尺度下的绝对结构数量；
+- \(p_{t,K}\) 表达 density 在各方向的相对形状；
+- \(M_{t,K}=|C_{t,K}|\) 表达该分辨率下的绝对结构数量；
 - 二者属于同一个 density，不需要二选一。
 
-Sample 的几何排布与分辨率分配只由 \(p\) 的变化特征决定；绝对量 \(M\) 通过各 Sample 固化的 \(\rho_j\) 与 \(m_j\) 保留。因此整体缩放 density 不改变 Sample 的相对排布，硬件预算 \(K\) 也不会冒充绝对 density。
+Sample 的几何排布与分辨率分配只由 \(p\) 的变化特征决定；绝对量 \(M\)
+通过各 Sample 固化的 \(\rho_j\) 与 \(m_j\) 保留。因此整体缩放 density 不
+改变 Sample 的相对排布。\(K\) 决定场版本能表达多细的结构，但仍不等于
+绝对 density 或相位预算。
 
 ### 5.3 Sample 生成
 
-给定 Sample 预算 \(K\)，\(\mathcal P_K\) 产生一个对相对 density \(p_{t,\ell}\) 的有限区域拟合。令 \(p_j=\rho_j/M_{t,\ell}\)，由 Sample 重建的相对 density 记作：
+给定 Sample 预算 \(K\)，\(\mathcal P_K\) 产生一个对相对 density
+\(p_{t,K}\) 的有限区域拟合。令 \(p_j=\rho_j/M_{t,K}\)，由 Sample 重建的
+相对 density 记作：
 
 \[
 \widehat p_S(u)=\sum_j p_j\phi_j(u).
@@ -331,7 +378,7 @@ Sample 的保真目标只能测量 \(p\) 与 \(\widehat p_S\) 之间尚未表达
 \sum_j
 \int_{\mathcal D}
 \phi_j(u)
-\big(p_{t,\ell}(u)-p_j\big)^2
+\big(p_{t,K}(u)-p_j\big)^2
 \,d\Omega.
 \]
 
@@ -366,7 +413,10 @@ R^{\varepsilon}
 \kappa_j=\sigma\rho_j.
 \]
 
-其中 \(\sigma\) 是对所有 Sample 相同的普适耦合尺度，而不是新的 Sample 属性。若直接把 density 定义为光学 density，可以通过单位选择令 \(\sigma=1\)；若坚持 \(\rho=Mp\) 的计数尺度，则 \(\sigma\) 的数值仍需由后续理论归一化或实验标定。
+其中 \(\sigma\) 是对所有 Sample 相同的场版本常量，而不是新的 Sample
+属性或运行期调节量。当前接受的归一化是：在该版本的初始化参考均匀场中，
+从作用点到对点的平均光学厚度为 1。implementation contract 必须给出参考
+场、求积与数值值；正常事件步不得重估或调节 \(\sigma\)。
 
 因此两种 density 信息承担不同职责：相对分布 \(p\) 的变化特征决定 Sample geometry，固化在 Sample 中的绝对 \(\rho_j\) 决定局部吸收强度。交互仍然只读取 Sample，不会回看原始 density。
 
@@ -815,9 +865,37 @@ a_j\ge0,
 
 ### 6.6 Sample Response 的守恒回分配
 
-Sample 代表的是当前尺度下的几何结构，不是数据库中的 Event 行。令 \(z_i\) 表示尺度 \(\ell\) 下第 \(i\) 个可区分几何单位，\(\mu_i>0\) 表示该单位在当前 density 规范下的结构权重；在规范化的 \(\rho=M_{t,\ell}p\) 中每个单位 \(\mu_i=1\)。同一 Coordinate 上的多个 EventContent 属于同一个单位，在该尺度下不可区分的 EventCoordinate 也不能从同一次 Sample 交互获得不同反馈。
+Sample 代表的是当前 \(K\) 派生尺度下的几何结构，不是数据库中的 Event 行。
+令 \(z_i\) 表示第 \(i\) 个可区分几何单位，\(\mu_i>0\) 表示该单位在当前
+density 规范下的结构权重；在规范化的 \(\rho=M_{t,K}p\) 中每个单位
+\(\mu_i=1\)。同一 Coordinate 上的多个 EventContent 属于同一个单位，在
+当前派生尺度下不可区分的 EventCoordinate 也不能从同一次 Sample 交互获得
+不同反馈。
 
-令 \(c_{ji}\) 表示几何单位 \(i\) 有多少结构责任由 Sample \(j\) 承担。它是前向 density-to-Sample 投影在本次交互中的非持久 coupling，必须满足：
+为避免与 Sample 预算 \(K\) 混淆，核函数统一记为 \(\mathsf{k}_\ell\)。令已接受的紧支撑 kernel 满足
+
+\[
+\mathsf{k}_{\ell_t^K}(u,z_i)\ge0,
+\qquad
+\int_{\mathcal D}\mathsf{k}_{\ell_t^K}(u,z_i)\,d\Omega=1,
+\]
+
+并用同一个 kernel 定义 density 与 Sample-to-geometry coupling：
+
+\[
+\rho_{t,K}(u)
+=\sum_i\mu_i\mathsf{k}_{\ell_t^K}(u,z_i),
+\]
+
+\[
+c_{ji}
+=\mu_i\int_{\mathcal D}
+\phi_j(u)\mathsf{k}_{\ell_t^K}(u,z_i)\,d\Omega.
+\]
+
+\(c_{ji}\) 表示几何单位 \(i\) 有多少结构责任由 Sample \(j\) 承担。它是
+前向 density-to-Sample 投影在本次交互中的非持久 coupling；由同一 kernel
+与 partition of unity 自动得到：
 
 \[
 c_{ji}\ge0,
@@ -917,10 +995,11 @@ L_{\mathrm{event}}
 
 ### 6.7 当前仍未由运输模型决定的内容
 
-运输模型还没有自动给出：
+当前已接受“连续模型作 reference、正式离散采用局部 upwind finite-volume，
+并通过反对称界面通量守恒”的方向，但运输模型还没有自动给出：
 
-- soft coverage 上的有限体积通量如何一致地逼近上述测地射线运输；
-- \(\sigma\) 是 density 单位的一部分，还是需要独立标定的普适尺度；
+- soft coverage 上唯一的网格、求积和通量重建如何一致地逼近上述测地射线运输；
+- 参考均匀场下 \(\sigma\) 的离散标定值；
 - 全局比例闭合后的 Response 空间衰减是否足以产生所需的局部作用范围。
 
 这些问题必须继续在 Sample 层内回答；不能为了补足方向信息而绕过 Sample 读取 Event 或原始 density。
@@ -941,23 +1020,23 @@ I_0^{\mathrm C}=I_0^{\mathrm A}=1.
 
 相等的是两个相位注入并最终闭合的标量总预算，不是最终坐标位移；自然作用分散于整个场且方向可以互相抵消，外界作用集中于一个作用点，两者一般不会互为逆映射。
 
-在自然相开始时冻结由旧场生成的 Sample 场 \(S_t^{\mathrm C}\)。令
+在自然相开始时冻结由旧场生成的 Sample 场 \(S_{t,K}^{\mathrm C}\)。令
 
 \[
-\mathcal M_t
-=\sum_hm_h
-=\int_{\mathcal D}\rho_t(u)\,d\Omega.
+\mathcal M_{t,K}^{\mathrm C}
+=\sum_hm_{h,K}^{\mathrm C}
+=\int_{\mathcal D}\rho_{t,K}^{\mathrm C}(u)\,d\Omega.
 \]
 
 每个正质量 Sample \(h\) 作为一次场内作用的源积分元，其源份额为：
 
 \[
-w_h^{\mathrm{src}}
-=\frac{m_h}{\mathcal M_t},
+w_{h,K}^{\mathrm{src},\mathrm C}
+=\frac{m_{h,K}^{\mathrm C}}{\mathcal M_{t,K}^{\mathrm C}},
 \qquad
-I_{0,h}^{\mathrm C}=w_h^{\mathrm{src}},
+I_{0,h,K}^{\mathrm C}=w_{h,K}^{\mathrm{src},\mathrm C},
 \qquad
-\sum_hw_h^{\mathrm{src}}=1.
+\sum_hw_{h,K}^{\mathrm{src},\mathrm C}=1.
 \]
 
 “每个 Sample 触发一次”指这组分辨率无关的求积贡献，不是发生 \(K\) 次状态更新，也不是每个 Sample 各发一份单位载荷。每个源 \(h\) 必须针对自己的 \(I_{0,h}^{\mathrm C}\) 分别完成第 6.1 节的原始账本与比例闭合，再汇总所有源的 Response；不能让一个低吸收源的残余由另一个源代为吸收。
@@ -973,15 +1052,15 @@ I_{0,h}^{\mathrm C}=w_h^{\mathrm{src}},
 自然相的总 Response 为：
 
 \[
-R_t^{\mathrm C}
-=\sum_{h:m_h>0}
+R_{t,K}^{\mathrm C}
+=\sum_{h:m_{h,K}^{\mathrm C}>0}
 \mathcal I^{-}
-(S_t^{\mathrm C},s_h,w_h^{\mathrm{src}}),
+(S_{t,K}^{\mathrm C},s_h,w_{h,K}^{\mathrm{src},\mathrm C}),
 \]
 
-其标量吸收量保持非负，方向矩使用 \(\varepsilon=-1\)，所以接收单位被拉向场内作用源，形成聚拢。若 \(\mathcal M_t=0\)，正常自然相不运行；该状态属于初始化而非小场稳定特例。
+其标量吸收量保持非负，方向矩使用 \(\varepsilon=-1\)，所以接收单位被拉向场内作用源，形成聚拢。若 \(\mathcal M_{t,K}^{\mathrm C}=0\)，正常自然相不运行；该状态属于初始化而非小场稳定特例。
 
-正常自然相还要求每个 \(m_h>0\) 的源都满足 \(A_{\mathrm{raw}}(s_h)>0\)。任一正质量源无法形成 raw 吸收时，整个事件步都不得通过丢弃该源、把其预算转给其他源或重新归一化剩余权重继续运行；这表示初始化门槛尚未满足。外界相同样要求 \(A_{\mathrm{raw}}(q_t)>0\)。
+正常自然相还要求每个 \(m_{h,K}^{\mathrm C}>0\) 的源都满足 \(A_{\mathrm{raw}}(s_h)>0\)。任一正质量源无法形成 raw 吸收时，整个事件步都不得通过丢弃该源、把其预算转给其他源或重新归一化剩余权重继续运行；这表示初始化门槛尚未满足。外界相同样要求 \(A_{\mathrm{raw}}(q_t)>0\)。
 
 ### 7.2 自然相更新后必须完整重建交互面
 
@@ -989,7 +1068,7 @@ R_t^{\mathrm C}
 
 \[
 E_t^{\mathrm C}
-=\mathcal B(E_t,R_t^{\mathrm C}),
+=\mathcal B(E_t,R_{t,K}^{\mathrm C}),
 \qquad
 z_i^{\mathrm C}
 =\operatorname{Exp}_{z_i(t)}
@@ -1001,28 +1080,30 @@ z_i^{\mathrm C}
 
 \[
 X_t^{\mathrm C}
-\xrightarrow{\mathcal C_\ell}
-C_{t,\ell}^{\mathrm A}
-\xrightarrow{\mathcal D_\ell}
-\rho_{t,\ell}^{\mathrm A}
+\xrightarrow{\ell_{t,K}^{\mathrm A}=\mathcal G_K(X_t^{\mathrm C})}
+\ell_{t,K}^{\mathrm A}
+\xrightarrow{\mathcal C_{\ell_{t,K}^{\mathrm A}}}
+C_{t,K}^{\mathrm A}
+\xrightarrow{\mathcal D_{\ell_{t,K}^{\mathrm A}}}
+\rho_{t,K}^{\mathrm A}
 \xrightarrow{\mathcal P_K}
-S_t^{\mathrm A}.
+S_{t,K}^{\mathrm A}.
 \]
 
-只重新移动 Sample 中心、沿用旧 \(\rho_j\)，或让外界相继续读取 \(S_t^{\mathrm C}\)，都违反当前态充分性与 Sample 充分性。令完整重建后、外界相开始时的可区分几何单位集合为 \(G_{\mathrm A}\)；它不要求与 \(G_{\mathrm C}\) 一一对应。
+只重新移动 Sample 中心、沿用旧 \(\rho_{j,K}^{\mathrm C}\)，或让外界相继续读取 \(S_{t,K}^{\mathrm C}\)，都违反当前态充分性与 Sample 充分性。令完整重建后、外界相开始时的可区分几何单位集合为 \(G_{\mathrm A}\)；它不要求与 \(G_{\mathrm C}\) 一一对应。
 
 ### 7.3 外界反坍缩与新 Event 最后落位
 
-新输入为不可变 Content \(c_t\) 与归一化作用方向 \(q_t\)。外界相以 \(q_t\) 为唯一源、以单位预算作用于新重建的 \(S_t^{\mathrm A}\)：
+新输入为不可变 Content \(c_t\) 与归一化作用方向 \(q_t\)。外界相以 \(q_t\) 为唯一源、以单位预算作用于新重建的 \(S_{t,K}^{\mathrm A}\)：
 
 \[
-R_t^{\mathrm A}
-=\mathcal I^{+}(S_t^{\mathrm A},q_t,1),
+R_{t,K}^{\mathrm A}
+=\mathcal I^{+}(S_{t,K}^{\mathrm A},q_t,1),
 \]
 
 \[
 E_t^{\mathrm A}
-=\mathcal B(E_t^{\mathrm C},R_t^{\mathrm A}),
+=\mathcal B(E_t^{\mathrm C},R_{t,K}^{\mathrm A}),
 \qquad
 z_k^{\mathrm A}
 =\operatorname{Exp}_{z_k^{\mathrm C}}
@@ -1030,7 +1111,10 @@ z_k^{\mathrm A}
 \qquad k\in G_{\mathrm A}.
 \]
 
-外界相使用 \(\varepsilon=+1\)，所以已有几何单位沿从 \(q_t\) 向外的传播方向移动。读出取自外界相 Response，发生在该相反馈和新 Event 沉积之前。
+外界相使用 \(\varepsilon=+1\)，所以已有几何单位沿从 \(q_t\) 向外的传播
+方向移动。读出取自外界相闭合后的非负标量 Sample Response，经同一
+coupling 回分配到可区分几何单位，再关联各单位上的 EventContent；不得重算
+第二套 cosine 分数。读出发生在该相反馈和新 Event 沉积之前。
 
 输入本身在两个相位开始前不会向 EventCoordinate 支撑集加入一个新几何单位；\(q_t\) 只作为外界边界作用点。若旧场已经有 Coordinate 位于 \(q_t\)，该既有几何单位仍照常参与两个相位并接受反馈，但新 Content 尚不存在，不能造成额外几何重数或当步自力。两个相位结束后才执行：
 
@@ -1049,7 +1133,7 @@ E_t
 \xrightarrow[\text{旧 Sample}]{\text{自然坍缩，预算 }1}
 E_t^{\mathrm C}
 \xrightarrow{\text{完整重建 Sample}}
-S_t^{\mathrm A}
+S_{t,K}^{\mathrm A}
 \xrightarrow[\text{作用点 }q_t]{\text{外界反坍缩，预算 }1}
 E_t^{\mathrm A}
 \xrightarrow{\text{在 }q_t\text{ 沉积 Content}}
@@ -1058,7 +1142,12 @@ E_{t+1}.
 
 ### 7.4 大场适用域与温和位移
 
-v2 的正常动力学是一套大场理论。它不靠运行期阻尼或额外步长把一个尚未建成的稀小场伪装成稳定场；初始化负责先建立足够大的有效参与结构。
+v2 的正常动力学是一套大场理论。场状态显式区分 `Building` 与 `Active`：
+`Building` 可批量沉积初始 Event，但不得运行正常两相动力学；进入 `Active`
+后，任何新增概念都必须逐个走完整事件步。只读 readiness probe 必须验证每个
+正质量自然源和代表性外界源均有吸收、coupling 可行、Response 集中度及最大
+预测位移满足冻结门槛。系统不靠运行期阻尼或额外步长把一个尚未建成的稀小
+场伪装成稳定场。
 
 对任一相位，令几何单位 \(i\) 分得的闭合标量份额为
 
@@ -1077,7 +1166,7 @@ N_{\mathrm{eff}}
 {\sum_i(r_i^{\mathrm{resp}})^2}.
 \]
 
-这里的 \(r_i^{\mathrm{resp}}\) 是接收端 Response 份额，不能与自然相的源权重 \(w_h^{\mathrm{src}}\)、DensitySite 数 \(M_{t,\ell}\) 或 Sample 数 \(K\) 混用。由 \(d(z_i,z_i')\le a_i=I_0r_i^{\mathrm{resp}}\) 可得响应份额加权的平均位移上界：
+这里的 \(r_i^{\mathrm{resp}}\) 是接收端 Response 份额，不能与自然相的源权重 \(w_{h,K}^{\mathrm{src},\mathrm C}\)、DensitySite 数 \(M_{t,K}\) 或 Sample 数 \(K\) 混用。由 \(d(z_i,z_i')\le a_i=I_0r_i^{\mathrm{resp}}\) 可得响应份额加权的平均位移上界：
 
 \[
 \sum_i r_i^{\mathrm{resp}}d(z_i,z_i')
@@ -1085,33 +1174,38 @@ N_{\mathrm{eff}}
 \frac{I_0}{N_{\mathrm{eff}}}.
 \]
 
-在均衡大场中，\(N_{\mathrm{eff}}\) 个参与单位近似等权，典型单点位移因而呈 \(O(1/N_{\mathrm{eff}})\)。一般非均衡场只能保证每相总角位移不超过 1；不能仅凭很大的 \(M_{t,\ell}\) 或 \(K\) 宣称单点位移必然很小。正常运行的初始化门槛必须以代表性作用点上的实际 \(N_{\mathrm{eff}}\) 与 Response 集中度验证，具体充分门槛属于测试和初始化设计，不在正常动力学中增加调节参数。
+在均衡大场中，\(N_{\mathrm{eff}}\) 个参与单位近似等权，典型单点位移因而呈 \(O(1/N_{\mathrm{eff}})\)。一般非均衡场只能保证每相总角位移不超过 1；不能仅凭很大的 \(M_{t,K}\) 或 \(K\) 宣称单点位移必然很小。正常运行的初始化门槛必须以代表性作用点上的实际 \(N_{\mathrm{eff}}\) 与 Response 集中度验证，具体充分门槛属于测试和初始化设计，不在正常动力学中增加调节参数。
 
 ### 7.5 遗忘、强化与动态平衡的当前含义
 
-自然相的设计目标是让场内源的反向方向矩在局部形成净聚拢；多源叠加、非对称 coverage 与比例闭合并不自动证明任意一对相邻 EventCoordinate 的距离都会单调减小。该目标必须在局部聚类与长期事件流 fixture 上验证。只要聚拢使 EventCoordinate 在尺度 \(\ell\) 下变得不可区分，\(M_{t,\ell}\) 就会减少；EventContent 没有被删除，但内容之间的几何区分逐渐丢失，这就是当前定义的自然遗忘。
+自然相的设计目标是让场内源的反向方向矩在局部形成净聚拢；多源叠加、非对称 coverage 与比例闭合并不自动证明任意一对相邻 EventCoordinate 的距离都会单调减小。该目标必须在局部聚类与长期事件流 fixture 上验证。只要聚拢使 EventCoordinate 在当前 \(K\) 派生尺度下变得不可区分，\(M_{t,K}\) 就会减少；EventContent 没有被删除，但内容之间的几何区分逐渐丢失，这就是当前定义的自然遗忘。
 
 外界相在作用点附近施加反向作用，阻止或逆转当地聚拢；随后新 Event 在 \(q_t\) 沉积。反复受到作用的区域因而更可能保持可区分结构，这就是当前定义的强化。近区外界反坍缩是否稳定压过自然相、远区是否仍由自然坍缩占优，以及长期是否形成非平凡动态平衡，取决于第 6 节运输与全局比例闭合产生的实际空间分布，必须按验证计划测量，本文不把它伪装成已经证明的定理。
 
 ---
 
-## 8. 两层保真度
+## 8. 一个 K 预算下的两段保真度
 
-DensitySite 与 Sample 的取点数量控制不同误差：
+DensitySite 重建与 Sample 离散仍控制不同误差，但它们不再拥有两个互相独立
+的运行预算。固定 \(K\) 先通过 \(\mathcal G_K\) 决定可表达的最细尺度，再用
+同一个 \(K\) 生成 Sample：
 
 \[
 EventCoordinate
-\xrightarrow[\text{density 重建保真}]{N_{\mathrm{site}}}
+\xrightarrow[\text{K 派生尺度下的重建误差}]{N_{\mathrm{site}}(K,X_t)}
 DensitySite
 \rightarrow Density
-\xrightarrow[\text{density 离散保真}]{N_{\mathrm{sample}}}
+\xrightarrow[\text{同一 K 下的离散误差}]{N_{\mathrm{sample}}\le K}
 Sample.
 \]
 
-- \(N_{\mathrm{site}}\) 控制 EventCoordinate 几何经过聚类后，density 被重建到什么精度；极限情况下每个不同 Coordinate 一个 DensitySite，聚类本身零损失。
-- \(N_{\mathrm{sample}}\) 控制连续 density 的相对变化特征被有限 Sample 场表达到什么精度；Response 不参与该数量或排布的定义。
+- \(N_{\mathrm{site}}(K,X_t)\) 是当前几何与预算共同导出的结果，不是第二个可调上限；
+- \(N_{\mathrm{sample}}\le K\) 控制派生 density 的相对变化特征被有限 Sample 场表达到什么精度；Response 不参与尺度、数量或排布的定义。
 
-将来应测量的是给定 density 误差阈值下的最小充分数量，例如 \(N_{\mathrm{site}}(\varepsilon_{\mathrm{site},\rho})\) 与 \(N_{\mathrm{sample}}(\varepsilon_{S,\rho})\)，而不是预设固定上限。Sample 误差只依赖 density 拟合；Response 随分辨率变化只能用于验证运输实现是否满足细分不变性，不能反过来指导 Sample 生成。
+implementation contract 必须证明 \(\mathcal G_K\) 选出的每个场版本同时满足
+重建与离散保真标准。跨 \(K\) 曲线比较的是不同分辨率模型族及其极限，不能
+把它标成同一场的纯数值细分。Sample 误差只依赖 density 拟合；Response 只能
+验证选定版本的运输，不能反过来指导尺度或 Sample 生成。
 
 ---
 
@@ -1119,7 +1213,8 @@ Sample.
 
 ### 9.1 重复不变性
 
-向同一 Coordinate 再挂一个 EventContent，不改变 \(X_t\)、\(C_{t,\ell}\)、\(\rho_{t,\ell}\) 或由它生成的 Sample 分布。它只改变该位置可读出的 Content 集合。
+向同一 Coordinate 再挂一个 EventContent，不改变 \(X_t\)、\(\ell_t^K\)、
+\(C_{t,K}\)、\(\rho_{t,K}\) 或由它生成的 Sample 分布。它只改变该位置可读出的 Content 集合。
 
 ### 9.2 全空间存在性
 
@@ -1131,7 +1226,9 @@ Sample.
 
 ### 9.4 分辨率单调性
 
-增加 DensitySite 或 Sample 的可用数量只能降低或保持相应的 density 逼近误差，不能改变同一场的物理规律。Sample 的排布不得读取 Response。
+在同一 \(X_t\) 上提高场版本预算 \(K\)，派生尺度只能变细或不变，重建与
+Sample 逼近误差只能降低或保持。不同 \(K\) 是显式不同的分辨率模型族；同一
+Active 场内不得改变 \(K\)。Sample 的排布不得读取 Response。
 
 ### 9.5 历史不可旁路
 
@@ -1165,9 +1262,11 @@ Sample Response 按可区分几何单位而非 EventContent 行数守恒分配�
 
 每个事件步必须严格执行“自然相更新旧场 → 完整重建 DensitySite、density 与 Sample → 外界相更新 → 在输入方向落入新 Event”。两相不得共用 Sample，也不得把位于不同切空间的反馈载荷先相加后只做一次 Exp。
 
-### 9.13 等预算与分辨率不变
+### 9.13 等预算与 K 版本边界
 
-自然相和外界相的总预算各为 1。自然相各 Sample 源只能获得 \(m_j/\sum_km_k\) 的份额；Sample 数量变化不得改变相位总预算。
+自然相和外界相的总预算各为 1。自然相各 Sample 源只能获得
+\(m_j/\sum_km_k\) 的份额；固定场版本内的 Sample 数量不得改变相位总预算。
+修改 \(K\) 必须走显式 resolution migration，不能作为事件步内调参。
 
 ### 9.14 大场适用域
 
@@ -1177,14 +1276,14 @@ Sample Response 按可区分几何单位而非 EventContent 行数守恒分配�
 
 ## 10. 后续理论必须回答、本文暂不回答的问题
 
-1. \(\mathcal C_\ell\) 的具体角聚类约束、代表 direction 和非唯一解处理。
-2. \(\mathcal D_\ell\) 的 density estimator，以及不同 DensitySite 尺度间的一致性。
-3. \(\mathcal P_K\) 如何依据相对 density 的变化误差生成有限 Sample，同时给出完整 coverage、volume 与固化 density。
-4. density 变化误差应采用单元方差、最坏测地路径积分误差还是更强的统一范数，以及给定误差下 \(N_{\mathrm{sample}}\) 的理论上界。
-5. soft coverage 上的有限体积通量如何一致地逼近测地射线运输，以及全局比例闭合后的 Response 是否保持足够的空间衰减。
-6. 普适耦合尺度 \(\sigma\) 应由 density 单位吸收、由 DensitySite 尺度导出，还是通过实验标定。
-7. 同时满足 soft locality 与两侧质量边缘的 coupling \(c_{ji}\) 在何种 Sample geometry 下存在，以及怎样稳定构造。
-8. 外界相 readout 的精确协议、近外界反坍缩与远自然坍缩的作用范围，以及长期非平凡动态平衡是否存在。
-9. 两层 density 保真度随取点数量的收敛曲线、理论上界，以及初始化所需的 \(N_{\mathrm{eff}}\) 充分门槛。
+1. \(\mathcal G_K\) 的唯一内禀误差准则、不可行边界、单调算法与 tie-break。
+2. \(\mathcal C_{\ell_t^K}\) 的具体角聚类约束、代表 direction 和非唯一解处理。
+3. 已接受的紧支撑 kernel family 的具体 profile、归一化与跨派生尺度一致性。
+4. \(\mathcal P_K\) 如何依据相对 density 的变化误差生成有限 Sample，同时给出完整 coverage、volume 与固化 density。
+5. density 变化误差应采用单元方差、最坏测地路径积分误差还是更强的统一范数，以及给定 \(K\) 的理论保真上界。
+6. soft coverage 上唯一的 upwind finite-volume 网格、求积与通量重建，以及全局比例闭合后的 Response 是否保持足够空间衰减。
+7. 参考均匀场、\(\sigma\) 的离散标定值，以及同一 kernel 导出的 coupling 在全部合法 geometry 上的稳定构造。
+8. 近外界反坍缩与远自然坍缩的作用范围，以及长期非平凡动态平衡是否存在。
+9. 初始化 readiness probe 的充分门槛，以及 Building 到 Active 的失败与恢复协议。
 
 这些问题不得修改已经确立的因果边界：**场是完整方向空间中的当前态；Event 是持久拟合；DensitySite 只拟合 density；density 决定真正的 Sample；Sample 是唯一交互面；只有 Sample Response 可以反馈已有 EventCoordinate；自然相更新后必须重建交互面，外界相结束后新 Event 才在输入方向落位。**

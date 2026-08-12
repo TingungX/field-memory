@@ -1,5 +1,17 @@
 # field-memory v2 设计理念：场、密度峰、影响传播
 
+Status: superseded
+Owner: field-memory
+Last updated: 2026-08-12
+Scope: v2 思想演进历史稿；不作为当前 v2 实现规范或验收基线
+Related code: 无；文中旧观察骨架不构成当前 v2 实现约束
+Related docs: [当前 v2 理论基石](../../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)
+Superseded by: [当前 v2 理论基石](../../design/field-memory-v2-foundations.md)
+
+> 本稿已 superseded，仅保留思想演进记录。文中的 anchor、固定/独立采样预算、
+> 1024 维连续场及其他未被当前理论基石确认的表述，不得直接用于实现；v2 的
+> 权威边界、K 派生尺度、S² reference 与生产维度实验以当前 ADR 和理论基石为准。
+
 > Memory is not a database. It's a relaxation system.
 > 记忆不是存储，是场的弛豫。场是唯一的本体。
 
