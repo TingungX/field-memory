@@ -5,7 +5,7 @@ Owner: field-memory
 Last updated: 2026-08-12
 Scope: v2 的场本体、Event 表示、density、Sample、守恒运输、两相事件步与大场动力学
 Related code: 尚无；现有实现不构成本理论的约束
-Related docs: [v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[生产维度实验](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
+Related docs: [v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[生产维度实验](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
 
 ## 0. 文档地位
 
@@ -59,6 +59,13 @@ v2 是 field-memory 的当前理论权威；现有 Anchor/impact/RelaxationCycle
 reference backend，用来提供解析 coverage、volume、测地线和运输参考解；
 它不是默认生产语义空间。生产维度只能由真实 embedding 的独立保真实验
 决定，低维 reference 上的动力学通过不能替代该门禁。
+
+当前生产语义表示已经由独立 formal 实验与 accepted ADR 冻结为
+\(D_{\rm semantic}=384\)，方向空间为 \(S^{383}\)。这个结论绑定已验证的
+BGE-M3 model digest、Build-only uncentered spherical PCA 和 projection bundle
+content hash；它不表示任意 384D 映射都合法。核心数学仍保持任意 \(D\)，
+`physics_reference_s2` 仍只用于严格 reference 测试。完整表示身份和重验边界见
+[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)。
 
 ### 1.3 理论对象与工程表示
 

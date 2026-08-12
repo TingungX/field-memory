@@ -8,7 +8,9 @@ field-memory v2 是当前理论与后续实现的唯一权威方向。v2 采用
 
 - v2 的当前理论权威是 `docs/design/field-memory-v2-foundations.md`；已接受的
   版本边界、分辨率与维度决策见
-  `docs/decisions/2026-08-12-v2-authority-resolution-and-dimension.md`。
+  `docs/decisions/2026-08-12-v2-authority-resolution-and-dimension.md`；当前生产
+  语义维度与投影身份见
+  `docs/decisions/2026-08-12-v2-semantic-dimension-384.md`。
 - 现有 `crates/core/field-mem-core` 及下文 Anchor/impact 规则属于冻结的 v1
   实现，只允许维护，不得据此约束或补全 v2。
 - v2 必须使用独立模块、状态和持久化版本；不得把 v1 的 Anchor、density

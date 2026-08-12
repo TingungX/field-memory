@@ -5,7 +5,7 @@ Owner: field-memory
 Last updated: 2026-08-12
 Scope: 冻结 BGE-M3 语义方向空间的降维保真度；不验证 v2 动力学
 Related code: `experiments/v2_dimension_fidelity/`
-Related docs: [实验协议](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)
+Related docs: [实验协议](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)
 
 ## 结论
 
@@ -21,8 +21,10 @@ minimum passing dimension 384
 passing dimensions        384, 512, 768
 ```
 
-这支持把 `semantic_candidate_d384` 与本次 projection bundle 作为后续
-implementation contract 的**候选生产表示**。它不批准 v2 动力学实现，也不证明
+用户已依据本报告接受 `semantic_candidate_d384` 与本次 projection bundle 作为
+当前生产语义表示；权威决定见
+[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)。
+这项接受不批准 v2 动力学实现，也不证明
 transport、守恒、局部性、坍缩、遗忘或长期平衡正确；`physics_reference_s2` 仍是
 独立的严格动力学 reference backend。
 
@@ -201,11 +203,13 @@ hash 才是本次计算的精确事实来源。实验没有读取无关工作树
 建议后续 accepted implementation contract 明确区分：
 
 1. `physics_reference_s2`：只用于解析几何、守恒和动力学 reference 测试；
-2. `semantic_candidate_d384`：当前冻结 BGE-M3/corpus 下第一个通过的候选；
+2. `semantic_candidate_d384`：当前冻结 BGE-M3/corpus 下第一个通过、且已被
+   接受为当前生产语义表示的候选类型对象；
 3. `native_embedding_reference_1024`：实验基准和模型/corpus 变化时的 provisional
    no-compression fallback。
 
-在用户明确接受 384 作为当前生产候选前，本报告不把它升级成不可变架构常量。
-即使接受，下一步仍是先冻结 v2 implementation contract，再按 Phase 0–4 验证
+用户已经接受 384 及其完整 projection identity；该决定不把 384 宣称为逐整数
+绝对下界，也不允许换用任意 384D 投影。下一步仍是先冻结 v2 implementation
+contract，再按 Phase 0–4 验证
 Sample、同核 coupling、守恒运输、Response、两相事件步与大场长期行为；不能
 用本次 representation pass 跳过理论和动力学门禁。

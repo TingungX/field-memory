@@ -5,7 +5,7 @@ Owner: field-memory
 Last updated: 2026-08-12
 Scope: v2 的 DensitySite、density、Sample、守恒运输、Response 反馈与事件步验证；不验证旧 v1 引擎或 retrieval 质量
 Related code: 计划中的 `crates/core/field-mem-core` v2 实现与其测试；当前尚无实现
-Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
+Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
 
 ## 1. 目的与边界
 
@@ -79,7 +79,13 @@ implementation contract 的 artifact schema 还必须同时冻结 `backend_kind`
 
 在开始 Phase 0 前，实施者必须从 accepted contract 逐项核对并原样镜像到测试 README：K-to-scale 分辨率算子、DensitySite 构造器、kernel density、Sample coverage/volume 生成器、同核 coupling、离散运输/吸收实现、Response 回分配，以及自然坍缩与外界反坍缩的 phase contract；同时记录契约文件的 SHA-256。实施者不得新增、修改或“合理化”其中的选择。外界 readout 在外界 Response 形成后、该相 scatter/Exp 反馈前完成；两相更新结束后，才在外界作用点 \(q\) 原位 append Event。若任一项尚未决定或测试 README 与契约 hash/内容不一致，必须按上述 incomplete 状态停止；不得用临时默认参数跨阶段推进。
 
-生产 backend 还必须引用一个通过 [生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md) 校验的 formal artifact，并冻结 embedding model digest、投影 bundle hash 与目标维度。没有通过候选时只能实现 `physics_reference_s2` backend，不能把它标为生产语义空间。
+生产 backend 必须同时引用 accepted 的
+[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md) 及其通过
+[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md) 校验的 formal
+artifact，并原样冻结 384D 目标、embedding model digest、projection family 与
+bundle content hash。formal artifact 通过只提供实验证据，不能代替用户接受的
+架构决定；同为 384D 的其他映射也不得借用该结论。未来若新实验没有压缩候选
+通过，只能实现 `physics_reference_s2` backend，不能把它标为生产语义空间。
 所有 artifact schema 还必须包含 `backend_kind` 与 `space_kind`：物理验证固定为 `backend_kind=physics_reference`、`space_kind=physics_reference_s2`；语义生产 artifact 必须记录 embedding/projection provenance，不能用缺少这些字段的 \(S^2\) artifact 冒充生产空间。
 
 测试 harness 必须提供以下稳定接口（名称可按 Rust 模块风格调整，但语义不可缺失）：
