@@ -160,6 +160,12 @@ pub fn derive_building_mapping(state: &FieldState) -> Result<Vec<MappingEntry>> 
         return Err(active_mapping_requires_resolution());
     }
 
+    let entries = derive_building_mapping_entries(state)?;
+    validate_mapping_for_state(state, &entries)?;
+    Ok(entries)
+}
+
+fn derive_building_mapping_entries(state: &FieldState) -> Result<Vec<MappingEntry>> {
     let mut units: Vec<BuildingGeometryUnit> = Vec::new();
     let mut event_unit_indices = Vec::with_capacity(state.events.len());
     for event in &state.events {
@@ -203,7 +209,7 @@ pub fn derive_building_mapping(state: &FieldState) -> Result<Vec<MappingEntry>> 
             .map_err(|_| V2Error::Serialization("geometry rank exceeds u64".into()))?;
     }
 
-    let entries = state
+    Ok(state
         .events
         .iter()
         .zip(event_unit_indices)
@@ -212,9 +218,7 @@ pub fn derive_building_mapping(state: &FieldState) -> Result<Vec<MappingEntry>> 
             geometry_gauge_rank: ranks[unit_index],
             site_id: None,
         })
-        .collect::<Vec<_>>();
-    validate_mapping_for_state(state, &entries)?;
-    Ok(entries)
+        .collect())
 }
 
 /// Atomically save a snapshot using a caller-derived complete mapping.
@@ -398,6 +402,7 @@ fn canonical_encode_embedding_identity(
 fn canonical_mapping_entries(entries: &[MappingEntry]) -> Result<Vec<MappingEntry>> {
     let mut entries = entries.to_vec();
     entries.sort_by_key(|entry| entry.event_id);
+    let mut distinct_ranks = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let expected_event_id = u64::try_from(index)
             .ok()
@@ -407,10 +412,23 @@ fn canonical_mapping_entries(entries: &[MappingEntry]) -> Result<Vec<MappingEntr
             })?;
         if entry.event_id != EventId(expected_event_id) {
             return Err(V2Error::Persistence(format!(
-                "mapping entries must contain each EventId exactly once in 1..={}: found {} at position {}",
+                "mapping entries must contain each EventId exactly once in 1..={}: found {} at canonical position {}",
                 entries.len(),
                 entry.event_id.0,
                 index
+            )));
+        }
+        if !distinct_ranks.contains(&entry.geometry_gauge_rank) {
+            distinct_ranks.push(entry.geometry_gauge_rank);
+        }
+    }
+    distinct_ranks.sort_unstable();
+    for (expected_rank, actual_rank) in distinct_ranks.into_iter().enumerate() {
+        let expected_rank = u64::try_from(expected_rank)
+            .map_err(|_| V2Error::Serialization("geometry rank exceeds u64".into()))?;
+        if actual_rank != expected_rank {
+            return Err(V2Error::Persistence(format!(
+                "mapping geometry_gauge_rank values must be contiguous in 0..: expected {expected_rank}, found {actual_rank}"
             )));
         }
     }
@@ -426,11 +444,23 @@ fn validate_mapping_for_state(state: &FieldState, entries: &[MappingEntry]) -> R
             state.events.len()
         )));
     }
-    for (event, entry) in state.events.iter().zip(entries) {
+    for (event, entry) in state.events.iter().zip(&entries) {
         if event.id != entry.event_id {
             return Err(V2Error::Persistence(
                 "mapping EventIds do not match the persistent Event rows".into(),
             ));
+        }
+    }
+
+    if state.lifecycle == Lifecycle::Building {
+        let expected_entries = derive_building_mapping_entries(state)?;
+        for (entry, expected) in entries.iter().zip(expected_entries) {
+            if entry.geometry_gauge_rank != expected.geometry_gauge_rank {
+                return Err(V2Error::Persistence(format!(
+                    "Building mapping geometry_gauge_rank for EventId {} does not match deterministic geometry derivation",
+                    entry.event_id.0
+                )));
+            }
         }
     }
     Ok(())
@@ -696,16 +726,16 @@ mod tests {
     }
 
     #[test]
-    fn mapping_hash_is_order_independent_but_rejects_missing_event_ids() {
+    fn mapping_hash_is_order_independent_and_requires_contiguous_geometry_ranks() {
         let ordered = vec![
             MappingEntry {
                 event_id: EventId(1),
-                geometry_gauge_rank: 1,
+                geometry_gauge_rank: 0,
                 site_id: None,
             },
             MappingEntry {
                 event_id: EventId(2),
-                geometry_gauge_rank: 0,
+                geometry_gauge_rank: 1,
                 site_id: Some(0),
             },
         ];
@@ -720,6 +750,94 @@ mod tests {
             site_id: None,
         }])
         .is_err());
+        assert!(mapping_sha256(&[
+            MappingEntry {
+                event_id: EventId(1),
+                geometry_gauge_rank: 0,
+                site_id: None,
+            },
+            MappingEntry {
+                event_id: EventId(2),
+                geometry_gauge_rank: 2,
+                site_id: None,
+            },
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn building_mapping_accepts_explicit_sites_but_rejects_noncanonical_ranks() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("snapshot.json");
+        let version = FieldVersion::physics_reference_s2(4).unwrap();
+        let mut state = new_building(version).unwrap();
+        state.deposit_building("one", point(1.0, 0.0, 0.0)).unwrap();
+        state.deposit_building("two", point(0.0, 1.0, 0.0)).unwrap();
+
+        let assigned_site = vec![
+            MappingEntry {
+                event_id: EventId(1),
+                geometry_gauge_rank: 0,
+                site_id: Some(0),
+            },
+            MappingEntry {
+                event_id: EventId(2),
+                geometry_gauge_rank: 1,
+                site_id: None,
+            },
+        ];
+        // The ordinary Building save path derives a geometry-only mapping,
+        // while the explicit path may carry SiteIds once the caller has a
+        // complete resolution witness.  Resolution integration validates the
+        // SiteId values; persistence can already prove the geometry ranks.
+        save_v2_with_mapping(&path, &state, &assigned_site).unwrap();
+
+        let incorrect_rank = vec![
+            MappingEntry {
+                event_id: EventId(1),
+                geometry_gauge_rank: 1,
+                site_id: None,
+            },
+            MappingEntry {
+                event_id: EventId(2),
+                geometry_gauge_rank: 0,
+                site_id: None,
+            },
+        ];
+        assert!(save_v2_with_mapping(&path, &state, &incorrect_rank).is_err());
+    }
+
+    #[test]
+    fn canonical_state_and_mapping_match_independent_phase0_golden_vectors() {
+        // The expected digests were computed by an independent bytewise SHA-256
+        // encoder of the contract's primitive wire values.  They intentionally
+        // do not use CanonicalWriter or any production encoding helper.
+        const STATE_SHA256: &str =
+            "398a7217d8ce6bbca1b0ac7113dc21c8db55e8970c0d0360bacd749a99cd032e";
+        const MAPPING_SHA256: &str =
+            "40fc80701b71f5ce2e39f17cf420b146179dca1e0c5c2f70e7eee99c4408a74d";
+
+        let version = FieldVersion::physics_reference_s2(4).unwrap();
+        let mut state = new_building(version).unwrap();
+        state
+            .deposit_building("alpha", point(1.0, 0.0, 0.0))
+            .unwrap();
+        state.deposit_building("β", point(0.0, 1.0, 0.0)).unwrap();
+        let mapping = vec![
+            MappingEntry {
+                event_id: EventId(1),
+                geometry_gauge_rank: 0,
+                site_id: None,
+            },
+            MappingEntry {
+                event_id: EventId(2),
+                geometry_gauge_rank: 1,
+                site_id: None,
+            },
+        ];
+
+        assert_eq!(state_sha256(&state).unwrap(), STATE_SHA256);
+        assert_eq!(mapping_sha256(&mapping).unwrap(), MAPPING_SHA256);
     }
 
     #[test]

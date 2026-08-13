@@ -1,9 +1,7 @@
-//! Deterministic geometry reduction and resolution scaffolding for v2.
+//! Deterministic geometry reduction and resolution selection for v2.
 //!
-//! This module owns only the EventCoordinate -> GeometryUnit -> DensitySite
-//! portion of the contract.  It deliberately does not approximate the
-//! residual-greedy Sample projection: until that projector exists every scale
-//! is recorded as unavailable rather than pretending that a resolution passed.
+//! This module owns EventCoordinate -> GeometryUnit -> DensitySite and records
+//! the Sample projector's first-passing witness at every contract scale.
 
 use std::cmp::Ordering;
 
@@ -12,6 +10,7 @@ use crate::{
     event::{Event, EventId, FieldState},
     geometry::Direction,
     numeric::{EPS_ANGLE, EPS_REPRESENTATION},
+    sample::{project_sample_field, ProjectionStatus, SampleField},
     version::MIN_SAMPLE_BUDGET,
 };
 
@@ -110,8 +109,7 @@ pub struct GeometrySiteAssignment {
     pub site_id: SiteId,
 }
 
-/// Stable candidate-key wire shape reserved for the later residual projector.
-/// It remains empty in Phase 0; resolution itself must not invent one.
+/// Stable candidate-key wire shape owned by the residual projector.
 pub type CandidateKey = (u8, u64, u8);
 
 /// A deterministic reason why an attempt has no passing Sample witness.
@@ -170,7 +168,7 @@ impl ResolutionAttempt {
 }
 
 /// The selected resolution witness. Only a real Sample projection may create
-/// one; Phase 0 derives no instances of this type.
+/// one.
 #[derive(Clone, Debug)]
 pub struct ResolutionWitness {
     pub scale: ScaleLevel,
@@ -224,7 +222,11 @@ impl DerivedResolution {
         } else if self.geometry_units.is_empty() {
             Some(ResolutionFailure::EmptyGeometry)
         } else {
-            Some(ResolutionFailure::SampleProjectionUnavailable)
+            self.attempts
+                .iter()
+                .filter_map(|attempt| attempt.failure.clone())
+                .next_back()
+                .or(Some(ResolutionFailure::SampleProjectionUnavailable))
         };
     }
 }
@@ -310,16 +312,74 @@ pub fn derive_density_sites(
     Ok((sites, assignments))
 }
 
-/// Derives all geometry/site attempts for a FieldState. Phase 0 intentionally
-/// records every non-empty attempt as projection-unavailable.
+/// Derives all geometry/site attempts and selects the finest backend projection
+/// that fits the state's frozen Sample budget.
 pub fn derive_resolution(state: &FieldState) -> Result<DerivedResolution> {
     state.validate()?;
-    derive_resolution_for_events(&state.events, state.version.sample_budget)
+    derive_resolution_for_version(&state.events, &state.version)
 }
 
-/// Event-slice entry point used by construction and tests before a FieldState
-/// is persisted. It has the same G_K semantics as [`derive_resolution`].
+/// Geometry-only Event-slice entry point retained for construction diagnostics.
+/// Its attempts explicitly remain projection-unavailable because no backend
+/// identity was supplied.
 pub fn derive_resolution_for_events(
+    events: &[Event],
+    sample_budget: u32,
+) -> Result<DerivedResolution> {
+    derive_resolution_geometry_only(events, sample_budget)
+}
+
+/// Event-slice entry point with the complete frozen backend identity.
+pub fn derive_resolution_for_version(
+    events: &[Event],
+    version: &crate::version::FieldVersion,
+) -> Result<DerivedResolution> {
+    version.validate()?;
+    let mut derived = derive_resolution_geometry_only(events, version.sample_budget)?;
+    if derived.geometry_units.is_empty() {
+        return Ok(derived);
+    }
+
+    for attempt in &mut derived.attempts {
+        let outcome = project_sample_field(version, attempt.scale, &attempt.sites)?;
+        attempt.n_req = outcome.n_req;
+        attempt.representation_error = outcome.representation_error;
+        attempt.witness_candidate_keys = outcome.witness_candidate_keys;
+        attempt.failure = match outcome.status {
+            ProjectionStatus::Available => None,
+            ProjectionStatus::Infeasible | ProjectionStatus::Unavailable => {
+                Some(ResolutionFailure::ProjectionFailure(
+                    outcome
+                        .failure_code
+                        .unwrap_or_else(|| "sample_projection_unavailable".to_owned()),
+                ))
+            }
+        };
+    }
+    derived.select_finest_passing();
+    Ok(derived)
+}
+
+/// Rebuilds the chosen scale and proves it still matches the resolution
+/// witness before exposing the frozen SampleField.
+pub fn build_sample_field(state: &FieldState) -> Result<SampleField> {
+    state.validate()?;
+    let derived = derive_resolution(state)?;
+    let witness = derived.require_witness()?;
+    let outcome = project_sample_field(&state.version, witness.scale, &witness.sites)?;
+    if !outcome.is_passing_for(state.version.sample_budget)
+        || outcome.n_req != Some(witness.n_req)
+        || outcome.representation_error != Some(witness.representation_error)
+        || outcome.witness_candidate_keys != witness.candidate_keys
+    {
+        return Err(V2Error::InvalidSampleField(
+            "reconstructed SampleField does not match the selected resolution witness".to_owned(),
+        ));
+    }
+    outcome.sample_field.ok_or(V2Error::ResolutionInfeasible)
+}
+
+fn derive_resolution_geometry_only(
     events: &[Event],
     sample_budget: u32,
 ) -> Result<DerivedResolution> {
@@ -401,28 +461,30 @@ fn validate_geometry_units(geometry_units: &[GeometryUnit]) -> Result<()> {
 fn farthest_point_prefix(geometry_units: &[GeometryUnit], ell: f64) -> Result<Vec<usize>> {
     debug_assert!(!geometry_units.is_empty());
     let mut selected = vec![0_usize];
+    let mut selected_flags = vec![false; geometry_units.len()];
+    selected_flags[0] = true;
+
+    // Each value is the exact minimum over the centers in `selected`, updated
+    // in selection order. This preserves the direct implementation's `min`
+    // arithmetic and its EPS-aware candidate comparison while avoiding a full
+    // rescan of every selected center for every candidate.
+    let mut nearest_selected_distance = vec![f64::INFINITY; geometry_units.len()];
+    for candidate_index in 1..geometry_units.len() {
+        nearest_selected_distance[candidate_index] = geometry_units[candidate_index]
+            .representative
+            .angle(&geometry_units[0].representative)?;
+    }
 
     loop {
         let mut best_index: Option<usize> = None;
         let mut best_distance = f64::NEG_INFINITY;
 
         for candidate_index in 0..geometry_units.len() {
-            if selected.contains(&candidate_index) {
+            if selected_flags[candidate_index] {
                 continue;
             }
 
-            let minimum_distance =
-                selected
-                    .iter()
-                    .try_fold(f64::INFINITY, |minimum, &center| {
-                        Ok::<_, V2Error>(
-                            minimum.min(
-                                geometry_units[candidate_index]
-                                    .representative
-                                    .angle(&geometry_units[center].representative)?,
-                            ),
-                        )
-                    })?;
+            let minimum_distance = nearest_selected_distance[candidate_index];
 
             let replaces_best = minimum_distance > best_distance + EPS_ANGLE
                 || ((minimum_distance - best_distance).abs() <= EPS_ANGLE
@@ -448,6 +510,19 @@ fn farthest_point_prefix(geometry_units: &[GeometryUnit], ell: f64) -> Result<Ve
             break;
         }
         selected.push(next);
+        selected_flags[next] = true;
+
+        for candidate_index in 0..geometry_units.len() {
+            if selected_flags[candidate_index] {
+                continue;
+            }
+
+            let distance = geometry_units[candidate_index]
+                .representative
+                .angle(&geometry_units[next].representative)?;
+            nearest_selected_distance[candidate_index] =
+                nearest_selected_distance[candidate_index].min(distance);
+        }
     }
 
     Ok(selected)
@@ -518,6 +593,65 @@ mod tests {
             content: format!("event-{id}"),
             coordinate: direction(coordinate),
         }
+    }
+
+    /// The pre-cache FPS scan retained as a differential oracle for the
+    /// cache's exact candidate/tolerance behavior.
+    fn direct_farthest_point_prefix(
+        geometry_units: &[GeometryUnit],
+        ell: f64,
+    ) -> Result<Vec<usize>> {
+        let mut selected = vec![0_usize];
+
+        loop {
+            let mut best_index: Option<usize> = None;
+            let mut best_distance = f64::NEG_INFINITY;
+
+            for candidate_index in 0..geometry_units.len() {
+                if selected.contains(&candidate_index) {
+                    continue;
+                }
+
+                let minimum_distance =
+                    selected
+                        .iter()
+                        .try_fold(f64::INFINITY, |minimum, &center| {
+                            Ok::<_, V2Error>(
+                                minimum.min(
+                                    geometry_units[candidate_index]
+                                        .representative
+                                        .angle(&geometry_units[center].representative)?,
+                                ),
+                            )
+                        })?;
+
+                let replaces_best = minimum_distance > best_distance + EPS_ANGLE
+                    || ((minimum_distance - best_distance).abs() <= EPS_ANGLE
+                        && best_index
+                            .map(|current| {
+                                compare_geometry_unit_order(
+                                    &geometry_units[candidate_index],
+                                    &geometry_units[current],
+                                ) == Ordering::Less
+                            })
+                            .unwrap_or(true));
+
+                if replaces_best {
+                    best_index = Some(candidate_index);
+                    best_distance = minimum_distance;
+                }
+            }
+
+            let Some(next) = best_index else {
+                break;
+            };
+            if best_distance <= ell {
+                break;
+            }
+            selected.push(next);
+        }
+
+        Ok(selected)
     }
 
     #[test]
@@ -604,6 +738,50 @@ mod tests {
     }
 
     #[test]
+    fn cached_fps_prefix_matches_direct_scan_at_every_contract_scale() {
+        // This fixture includes symmetric axes (gauge ties) and an asymmetric
+        // point, so it exercises both ordinary maximum-distance choices and
+        // the contract's intrinsic-signature tie-break.
+        let events = vec![
+            event(9, &[1.0, 0.0, 0.0]),
+            event(3, &[-1.0, 0.0, 0.0]),
+            event(7, &[0.0, 1.0, 0.0]),
+            event(5, &[0.0, -1.0, 0.0]),
+            event(11, &[0.0, 0.0, 1.0]),
+            event(13, &[0.0, 0.0, -1.0]),
+            event(15, &[1.0, 1.0, 1.0]),
+        ];
+        let units = derive_geometry_units(&events).expect("geometry derives");
+
+        for scale in scale_ladder() {
+            let expected =
+                direct_farthest_point_prefix(&units, scale.ell()).expect("direct FPS derives");
+            let actual = farthest_point_prefix(&units, scale.ell()).expect("cached FPS derives");
+            assert_eq!(actual, expected, "scale level {}", scale.level());
+
+            let (sites, assignments) =
+                derive_density_sites(&units, scale).expect("public site output derives");
+            assert_eq!(
+                sites
+                    .iter()
+                    .map(|site| site.geometry_gauge_rank)
+                    .collect::<Vec<_>>(),
+                expected
+                    .iter()
+                    .map(|&index| units[index].gauge_rank)
+                    .collect::<Vec<_>>(),
+                "site order at scale level {}",
+                scale.level(),
+            );
+            assert_eq!(assignments.len(), units.len());
+            assert!(assignments.iter().all(|assignment| {
+                assignment.geometry_gauge_rank < units.len() as GeometryGaugeRank
+                    && assignment.site_id < sites.len() as SiteId
+            }));
+        }
+    }
+
+    #[test]
     fn phase_zero_records_each_scale_as_projection_unavailable() {
         let events = vec![event(1, &[1.0, 0.0, 0.0]), event(2, &[0.0, 1.0, 0.0])];
         let derived = derive_resolution_for_events(&events, 64).expect("resolution derives");
@@ -624,6 +802,29 @@ mod tests {
             derived.require_witness(),
             Err(V2Error::ResolutionInfeasible)
         ));
+    }
+
+    #[test]
+    fn semantic_resolution_records_a_real_first_passing_witness() {
+        let mut events = Vec::new();
+        for (id, axis) in (1_u64..=3).zip(0_usize..3) {
+            let mut coordinate = vec![0.0; 384];
+            coordinate[axis] = 1.0;
+            events.push(event(id, &coordinate));
+        }
+        let version =
+            crate::version::FieldVersion::semantic_production_384(8).expect("semantic version");
+        let derived =
+            derive_resolution_for_version(&events, &version).expect("semantic resolution");
+        let witness = derived.require_witness().expect("passing witness");
+
+        assert!(witness.n_req <= u64::from(version.sample_budget));
+        assert!(witness.representation_error <= EPS_REPRESENTATION);
+        assert!(!witness.candidate_keys.is_empty());
+        assert!(derived
+            .attempts
+            .iter()
+            .any(|attempt| attempt.failure.is_none()));
     }
 
     #[test]
