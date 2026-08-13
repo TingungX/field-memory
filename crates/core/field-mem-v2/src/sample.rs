@@ -1,18 +1,23 @@
-//! Density-only Sample projection for the v2 semantic backend.
+//! Density-only Sample projection for both v2 backends.
 //!
-//! This module deliberately stops at a frozen `SampleField`.  Transport and
-//! Response consume that field later; they must not call back into the
-//! `DensitySite` or Event representation.  The continuous S2 implementation
-//! remains an explicit unavailable outcome here until its complete reference
-//! path is wired into this projector.
+//! This module stops at a frozen `SampleField`.  Transport and Response consume
+//! that field later; they must not call back into the `DensitySite` or Event
+//! representation.  Both backends share the residual-greedy candidate loop;
+//! only the prefix integrals differ (semantic finite controls vs S² cubature).
 
 use std::cmp::Ordering;
 
 use crate::{
     error::{Result, V2Error},
     geometry::Direction,
-    kernel::{semantic_column_weights, WendlandC2},
-    numeric::{log_sum_exp, KahanSum, EPS_ABS, EPS_ANGLE, EPS_REL, EPS_REPRESENTATION, SIGMA},
+    kernel::{
+        integrate_s2_adaptive, normalize_s2, semantic_column_weights, S2CubatureCell,
+        S2CubatureLeaf, S2Normalization, S2SupportCap, WendlandC2,
+    },
+    numeric::{
+        log_sum_exp, KahanSum, CUT_LOCUS_MARGIN_RAD, EPS_ABS, EPS_ANGLE, EPS_QUADRATURE, EPS_REL,
+        EPS_REPRESENTATION, SIGMA,
+    },
     resolution::{CandidateKey, DensitySite, ScaleLevel},
     version::{BackendKind, FieldVersion, SpaceKind},
 };
@@ -95,6 +100,8 @@ pub struct SampleField {
     pub structural_pass: bool,
     pub structural_failure: Option<String>,
     pub candidate_keys: Vec<CandidateKey>,
+    /// Frozen S² adaptive-cubature leaves.  Semantic fields store `None`.
+    pub cubature_leaves: Option<Vec<S2CubatureLeaf>>,
 }
 
 /// Distinguishes a backend that is not implemented from a finite projection
@@ -137,10 +144,6 @@ impl SampleProjectionOutcome {
 }
 
 /// Project one scale using the backend selected by `version`.
-///
-/// `physics_reference_s2` is intentionally reported as a structured
-/// unavailable outcome here.  A caller may not turn an unavailable S2 path
-/// into a fake zero-error witness.
 pub fn project_sample_field(
     version: &FieldVersion,
     scale: ScaleLevel,
@@ -152,15 +155,7 @@ pub fn project_sample_field(
             project_semantic_sample_field(version, scale, sites)
         }
         (BackendKind::PhysicsReference, SpaceKind::PhysicsReferenceS2) => {
-            Ok(SampleProjectionOutcome {
-                scale,
-                status: ProjectionStatus::Unavailable,
-                n_req: None,
-                representation_error: None,
-                failure_code: Some("sample_projection_unavailable_s2".to_owned()),
-                witness_candidate_keys: Vec::new(),
-                sample_field: None,
-            })
+            project_s2_sample_field(version, scale, sites)
         }
         _ => Err(V2Error::InvalidVersion(
             "backend and space identities are an invalid combination".to_owned(),
@@ -188,6 +183,96 @@ pub fn project_semantic_sample_field(
     }
 
     let density = SemanticDensity::build(scale, sites)?;
+    match run_residual_greedy(scale, sites, |nodes| {
+        evaluate_semantic_prefix(scale, &density, nodes)
+    })? {
+        GreedyResult::Outcome(outcome) => Ok(outcome),
+        GreedyResult::Passed {
+            evaluation,
+            selected_keys,
+        } => {
+            let sample_field = evaluation.into_semantic_sample_field(
+                version,
+                scale,
+                &density,
+                selected_keys.clone(),
+            )?;
+            available_outcome(scale, selected_keys, sample_field)
+        }
+    }
+}
+
+/// Continuous S² specialization.  Uses the same residual-greedy loop as the
+/// semantic backend; prefix integrals come from adaptive cube-face cubature.
+pub fn project_s2_sample_field(
+    version: &FieldVersion,
+    scale: ScaleLevel,
+    sites: &[DensitySite],
+) -> Result<SampleProjectionOutcome> {
+    if version.backend_kind != BackendKind::PhysicsReference
+        || version.space_kind != SpaceKind::PhysicsReferenceS2
+    {
+        return Err(V2Error::InvalidVersion(
+            "S2 projection requires physics_reference_s2".to_owned(),
+        ));
+    }
+    validate_sites(version, sites)?;
+    if sites.is_empty() {
+        return Ok(infeasible_outcome(scale, "empty_density_sites"));
+    }
+
+    let density = S2Density::build(scale, sites)?;
+    match run_residual_greedy(scale, sites, |nodes| {
+        evaluate_s2_prefix(scale, &density, nodes)
+    })? {
+        GreedyResult::Outcome(outcome) => Ok(outcome),
+        GreedyResult::Passed {
+            evaluation,
+            selected_keys,
+        } => {
+            let sample_field = evaluation.into_s2_sample_field(
+                version,
+                scale,
+                &density,
+                selected_keys.clone(),
+            )?;
+            available_outcome(scale, selected_keys, sample_field)
+        }
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+enum GreedyResult {
+    Outcome(SampleProjectionOutcome),
+    Passed {
+        evaluation: PrefixEvaluation,
+        selected_keys: Vec<CandidateKey>,
+    },
+}
+
+fn available_outcome(
+    scale: ScaleLevel,
+    selected_keys: Vec<CandidateKey>,
+    sample_field: SampleField,
+) -> Result<SampleProjectionOutcome> {
+    let n_req = u64::try_from(sample_field.samples.len())
+        .map_err(|_| V2Error::InvalidSampleField("Sample node count exceeds u64".to_owned()))?;
+    Ok(SampleProjectionOutcome {
+        scale,
+        status: ProjectionStatus::Available,
+        n_req: Some(n_req),
+        representation_error: Some(sample_field.representation_error),
+        failure_code: None,
+        witness_candidate_keys: selected_keys,
+        sample_field: Some(sample_field),
+    })
+}
+
+fn run_residual_greedy(
+    scale: ScaleLevel,
+    sites: &[DensitySite],
+    mut evaluate_prefix: impl FnMut(&mut [Sample]) -> Result<PrefixEvaluation>,
+) -> Result<GreedyResult> {
     let candidates = build_candidates(sites)?;
     let mut nodes = vec![candidates[0].as_carrier(0), candidates[1].as_carrier(1)];
     let mut selected_keys = vec![candidates[0].key, candidates[1].key];
@@ -201,7 +286,7 @@ pub fn project_semantic_sample_field(
                 // not be selected merely to consume a candidate key.
                 continue;
             };
-            let evaluation = evaluate_prefix(scale, &density, &mut operation_nodes)?;
+            let evaluation = evaluate_prefix(&mut operation_nodes)?;
             if !evaluation.candidate_score_valid {
                 continue;
             }
@@ -224,7 +309,7 @@ pub fn project_semantic_sample_field(
         }
 
         let Some((candidate, evaluation)) = best else {
-            return Ok(SampleProjectionOutcome {
+            return Ok(GreedyResult::Outcome(SampleProjectionOutcome {
                 scale,
                 status: ProjectionStatus::Infeasible,
                 n_req: None,
@@ -232,7 +317,7 @@ pub fn project_semantic_sample_field(
                 failure_code: Some("projection_candidate_exhausted".to_owned()),
                 witness_candidate_keys: selected_keys,
                 sample_field: None,
-            });
+            }));
         };
 
         let operation_key = candidate.key;
@@ -244,19 +329,9 @@ pub fn project_semantic_sample_field(
             && evaluation.uncovered_physical_mass == 0.0
             && evaluation.representation_error <= EPS_REPRESENTATION
         {
-            let n_req = u64::try_from(nodes.len()).map_err(|_| {
-                V2Error::InvalidSampleField("Sample node count exceeds u64".to_owned())
-            })?;
-            let sample_field =
-                evaluation.into_sample_field(version, scale, &density, selected_keys.clone())?;
-            return Ok(SampleProjectionOutcome {
-                scale,
-                status: ProjectionStatus::Available,
-                n_req: Some(n_req),
-                representation_error: Some(sample_field.representation_error),
-                failure_code: None,
-                witness_candidate_keys: selected_keys,
-                sample_field: Some(sample_field),
+            return Ok(GreedyResult::Passed {
+                evaluation,
+                selected_keys,
             });
         }
     }
@@ -409,11 +484,25 @@ struct PrefixEvaluation {
     structural_pass: bool,
     structural_failure: Option<String>,
     candidate_score_valid: bool,
+    cubature_leaves: Option<Vec<S2CubatureLeaf>>,
 }
 
 impl PrefixEvaluation {
-    fn into_sample_field(
-        self,
+    fn freeze_samples(&mut self) -> Result<Vec<Sample>> {
+        let mut samples = std::mem::take(&mut self.nodes);
+        for (sample_index, sample) in samples.iter_mut().enumerate() {
+            sample.id = u64::try_from(sample_index)
+                .map_err(|_| V2Error::InvalidSampleField("SampleId exceeds u64".to_owned()))?;
+            sample.transport_volume = self.transport_volumes[sample_index];
+            sample.physical_volume = self.physical_volumes[sample_index];
+            sample.mass = self.masses[sample_index];
+            sample.density = self.densities[sample_index];
+        }
+        Ok(samples)
+    }
+
+    fn into_semantic_sample_field(
+        mut self,
         version: &FieldVersion,
         scale: ScaleLevel,
         density: &SemanticDensity,
@@ -424,15 +513,7 @@ impl PrefixEvaluation {
                 "cannot freeze a structurally invalid SampleField".to_owned(),
             ));
         }
-        let mut samples = self.nodes;
-        for (sample_index, sample) in samples.iter_mut().enumerate() {
-            sample.id = u64::try_from(sample_index)
-                .map_err(|_| V2Error::InvalidSampleField("SampleId exceeds u64".to_owned()))?;
-            sample.transport_volume = self.transport_volumes[sample_index];
-            sample.physical_volume = self.physical_volumes[sample_index];
-            sample.mass = self.masses[sample_index];
-            sample.density = self.densities[sample_index];
-        }
+        let samples = self.freeze_samples()?;
         Ok(SampleField {
             version: version.clone(),
             scale,
@@ -452,11 +533,48 @@ impl PrefixEvaluation {
             structural_pass: self.structural_pass,
             structural_failure: self.structural_failure,
             candidate_keys,
+            cubature_leaves: None,
+        })
+    }
+
+    fn into_s2_sample_field(
+        mut self,
+        version: &FieldVersion,
+        scale: ScaleLevel,
+        density: &S2Density,
+        candidate_keys: Vec<CandidateKey>,
+    ) -> Result<SampleField> {
+        if !self.structural_pass {
+            return Err(V2Error::InvalidSampleField(
+                "cannot freeze a structurally invalid SampleField".to_owned(),
+            ));
+        }
+        let samples = self.freeze_samples()?;
+        Ok(SampleField {
+            version: version.clone(),
+            scale,
+            sites: density.sites.clone(),
+            samples,
+            phi: self.phi,
+            chi: self.chi,
+            operational_kernel: None,
+            coupling: self.coupling,
+            graph_edges: self.graph_edges,
+            absorption: self.absorption,
+            density_values: Vec::new(),
+            probability_values: Vec::new(),
+            reconstructed_probability: self.reconstructed_probability,
+            uncovered_physical_mass: self.uncovered_physical_mass,
+            representation_error: self.representation_error,
+            structural_pass: self.structural_pass,
+            structural_failure: self.structural_failure,
+            candidate_keys,
+            cubature_leaves: self.cubature_leaves,
         })
     }
 }
 
-fn evaluate_prefix(
+fn evaluate_semantic_prefix(
     scale: ScaleLevel,
     density: &SemanticDensity,
     nodes: &mut [Sample],
@@ -732,7 +850,680 @@ fn evaluate_prefix(
         structural_pass,
         structural_failure,
         candidate_score_valid,
+        cubature_leaves: None,
     })
+}
+
+#[derive(Clone, Debug)]
+struct S2Density {
+    sites: Vec<DensitySite>,
+    normalization: S2Normalization,
+    total_mass: f64,
+}
+
+impl S2Density {
+    fn build(scale: ScaleLevel, sites: &[DensitySite]) -> Result<Self> {
+        let mut total_mass_sum = KahanSum::default();
+        for site in sites {
+            if !site.mu.is_finite() || site.mu <= 0.0 {
+                return Err(V2Error::InvalidSampleField(
+                    "DensitySite mass must be finite and positive".to_owned(),
+                ));
+            }
+            total_mass_sum.add(site.mu);
+        }
+        Ok(Self {
+            sites: sites.to_vec(),
+            normalization: normalize_s2(scale.ell())?,
+            total_mass: finite_positive(total_mass_sum.total(), "S2 total mass")?,
+        })
+    }
+
+    fn ell(&self) -> f64 {
+        self.normalization.ell
+    }
+
+    fn kernel_at(&self, at: &Direction, site: &DensitySite) -> Result<f64> {
+        s2_kernel_value(self.normalization, at.angle(&site.direction)?)
+    }
+
+    fn rho_at(&self, at: &Direction) -> Result<f64> {
+        let mut sum = KahanSum::default();
+        for site in &self.sites {
+            sum.add(site.mu * self.kernel_at(at, site)?);
+        }
+        finite_nonnegative(sum.total(), "S2 density")
+    }
+
+    fn support_positive(&self, at: &Direction) -> Result<bool> {
+        for site in &self.sites {
+            if at.angle(&site.direction)? < self.ell() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+fn s2_kernel_value(normalization: S2Normalization, angle: f64) -> Result<f64> {
+    let log = normalization.log_evaluate(angle)?;
+    if log.is_nan() || log == f64::INFINITY {
+        return Err(V2Error::NonFiniteVector("S2 kernel"));
+    }
+    if log.is_finite() {
+        Ok(log.exp())
+    } else {
+        Ok(0.0)
+    }
+}
+
+struct S2StructureLayout {
+    sample_count: usize,
+    physical_count: usize,
+    site_count: usize,
+    overlap_offset: usize,
+    vp_offset: usize,
+    coupling_offset: usize,
+    uncovered_offset: usize,
+    phi_chi_offset: usize,
+    component_count: usize,
+}
+
+impl S2StructureLayout {
+    fn new(sample_count: usize, physical_count: usize, site_count: usize) -> Self {
+        let pair_count = sample_count.saturating_mul(sample_count.saturating_sub(1)) / 2;
+        let overlap_offset = sample_count;
+        let vp_offset = overlap_offset + pair_count;
+        let coupling_offset = vp_offset + physical_count;
+        let uncovered_offset = coupling_offset + physical_count * site_count;
+        let phi_chi_offset = uncovered_offset + 1;
+        let component_count = phi_chi_offset + sample_count * physical_count;
+        Self {
+            sample_count,
+            physical_count,
+            site_count,
+            overlap_offset,
+            vp_offset,
+            coupling_offset,
+            uncovered_offset,
+            phi_chi_offset,
+            component_count,
+        }
+    }
+
+    fn pair_index(&self, low: usize, high: usize) -> usize {
+        low * (2 * self.sample_count - low - 1) / 2 + (high - low - 1)
+    }
+
+    fn overlap(&self, low: usize, high: usize) -> usize {
+        self.overlap_offset + self.pair_index(low, high)
+    }
+
+    fn coupling(&self, physical_position: usize, site_index: usize) -> usize {
+        self.coupling_offset + physical_position * self.site_count + site_index
+    }
+
+    fn phi_chi(&self, owner: usize, absorber_position: usize) -> usize {
+        self.phi_chi_offset + owner * self.physical_count + absorber_position
+    }
+}
+
+fn evaluate_s2_prefix(
+    scale: ScaleLevel,
+    density: &S2Density,
+    nodes: &mut [Sample],
+) -> Result<PrefixEvaluation> {
+    if nodes.is_empty() {
+        return Err(V2Error::InvalidSampleField(
+            "Sample prefix cannot be empty".to_owned(),
+        ));
+    }
+    let sample_count = nodes.len();
+    let physical_indices: Vec<usize> = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, sample)| sample.role.is_physical().then_some(index))
+        .collect();
+    let layout = S2StructureLayout::new(sample_count, physical_indices.len(), density.sites.len());
+    let support = s2_structure_support(nodes, density)?;
+    let structure = integrate_s2_adaptive(
+        layout.component_count,
+        &support,
+        |at| evaluate_s2_structure_integrand(at, nodes, &physical_indices, density, &layout),
+        |cell| s2_structure_activity_bounds(cell, nodes, &physical_indices, density, &layout),
+    )?;
+
+    let mut transport_volumes = vec![0.0; sample_count];
+    for (sample_index, volume) in transport_volumes.iter_mut().enumerate() {
+        *volume = finite_nonnegative(structure.fine_values[sample_index], "transport volume")?;
+    }
+    let total_transport_volume = kahan_sum_finite(&transport_volumes, "transport volumes")?;
+
+    let mut physical_volumes = vec![None; sample_count];
+    for (physical_position, &sample_index) in physical_indices.iter().enumerate() {
+        let value = finite_nonnegative(
+            structure.fine_values[layout.vp_offset + physical_position],
+            "physical responsibility volume",
+        )?;
+        physical_volumes[sample_index] = Some(value);
+    }
+
+    let mut coupling = vec![vec![0.0; density.sites.len()]; physical_indices.len()];
+    let mut masses = vec![None; sample_count];
+    let mut densities = vec![None; sample_count];
+    for (physical_position, &sample_index) in physical_indices.iter().enumerate() {
+        for (site_index, target) in coupling[physical_position].iter_mut().enumerate() {
+            let component = layout.coupling(physical_position, site_index);
+            *target = finite_nonnegative(structure.fine_values[component], "coupling")?;
+        }
+        let mass = kahan_sum_finite(&coupling[physical_position], "physical sample mass")?;
+        masses[sample_index] = Some(mass);
+        if let Some(volume) = physical_volumes[sample_index] {
+            if volume > 0.0 {
+                densities[sample_index] = Some(mass / volume);
+            }
+        }
+    }
+
+    let uncovered_integral =
+        finite_nonnegative(structure.fine_values[layout.uncovered_offset], "uncovered mass")?;
+    let uncovered_error =
+        finite_nonnegative(structure.error_bounds[layout.uncovered_offset], "uncovered error")?;
+    let mut uncovered_physical_mass = uncovered_integral / density.total_mass;
+    if !uncovered_physical_mass.is_finite() || uncovered_physical_mass < 0.0 {
+        return Err(V2Error::InvalidSampleField(
+            "uncovered physical mass is non-finite".to_owned(),
+        ));
+    }
+
+    let mut graph_edges = Vec::new();
+    let mut graph_adjacency = vec![Vec::new(); sample_count];
+    let mut graph_cut_locus = false;
+    let mut graph_unresolved = false;
+    for low in 0..sample_count {
+        for high in (low + 1)..sample_count {
+            let component = layout.overlap(low, high);
+            let overlap = finite_nonnegative(structure.fine_values[component], "graph overlap")?;
+            let overlap_error =
+                finite_nonnegative(structure.error_bounds[component], "graph overlap error")?;
+            match s2_overlap_class(overlap, overlap_error) {
+                S2OverlapClass::Zero => {}
+                S2OverlapClass::Unresolved => graph_unresolved = true,
+                S2OverlapClass::Nonzero => {
+                    let separation = nodes[low].direction.angle(&nodes[high].direction)?;
+                    if separation <= EPS_ANGLE
+                        || separation >= std::f64::consts::PI - CUT_LOCUS_MARGIN_RAD
+                    {
+                        graph_cut_locus = true;
+                        continue;
+                    }
+                    let conductance = overlap / separation;
+                    if !conductance.is_finite() || conductance <= 0.0 {
+                        return Err(V2Error::InvalidSampleField(
+                            "graph conductance is non-finite".to_owned(),
+                        ));
+                    }
+                    graph_edges.push(GraphEdge {
+                        low_sample_id: low as u64,
+                        high_sample_id: high as u64,
+                        overlap,
+                        conductance,
+                    });
+                    graph_adjacency[low].push(high);
+                    graph_adjacency[high].push(low);
+                }
+            }
+        }
+    }
+    let graph_connected = graph_is_connected(&graph_adjacency);
+
+    let mut absorption = vec![vec![0.0; physical_indices.len()]; sample_count];
+    for (owner, owner_row) in absorption.iter_mut().enumerate() {
+        for (absorber_position, &absorber) in physical_indices.iter().enumerate() {
+            let overlap = finite_nonnegative(
+                structure.fine_values[layout.phi_chi(owner, absorber_position)],
+                "absorption overlap",
+            )?;
+            let rho = densities[absorber].unwrap_or(0.0);
+            let value = SIGMA * rho * overlap;
+            if !value.is_finite() || value < 0.0 {
+                return Err(V2Error::InvalidSampleField(
+                    "absorption coefficient is non-finite".to_owned(),
+                ));
+            }
+            owner_row[absorber_position] = value;
+        }
+    }
+
+    let geometric_certificate =
+        s2_site_support_certificate(nodes, &density.sites, scale.ell())?;
+    if geometric_certificate
+        && uncovered_physical_mass <= EPS_ABS.max(uncovered_error / density.total_mass)
+    {
+        uncovered_physical_mass = 0.0;
+    }
+
+    let candidate_score_valid = physical_indices.iter().any(|&index| {
+        physical_volumes[index].is_some_and(|value| value > 0.0)
+            && masses[index].is_some_and(|value| value > 0.0)
+    });
+
+    let representation_error = if candidate_score_valid {
+        s2_representation_error(nodes, &physical_indices, density, &densities)?
+    } else {
+        f64::INFINITY
+    };
+
+    let physical_positive = physical_indices.iter().all(|&index| {
+        physical_volumes[index].is_some_and(|value| value > 0.0)
+            && masses[index].is_some_and(|value| value > 0.0)
+            && densities[index].is_some_and(|value| value.is_finite() && value > 0.0)
+    });
+    let coupling_marginals = s2_coupling_marginals_hold(&coupling, &density.sites);
+    let coupling_cut_locus = coupling.iter().enumerate().any(|(physical_position, row)| {
+        row.iter().enumerate().any(|(site_index, value)| {
+            *value > EPS_ABS
+                && nodes[physical_indices[physical_position]]
+                    .direction
+                    .angle(&density.sites[site_index].direction)
+                    .map(|theta| theta >= std::f64::consts::PI - CUT_LOCUS_MARGIN_RAD)
+                    .unwrap_or(true)
+        })
+    });
+    let absorption_cut_locus = absorption.iter().enumerate().any(|(owner, row)| {
+        row.iter().enumerate().any(|(absorber_position, value)| {
+            *value > EPS_ABS
+                && nodes[owner]
+                    .direction
+                    .angle(&nodes[physical_indices[absorber_position]].direction)
+                    .map(|theta| theta >= std::f64::consts::PI - CUT_LOCUS_MARGIN_RAD)
+                    .unwrap_or(true)
+        })
+    });
+
+    let mut structural_failure = None;
+    let duplicate_direction = (0..sample_count).any(|left| {
+        ((left + 1)..sample_count).any(|right| {
+            nodes[left]
+                .direction
+                .angle(&nodes[right].direction)
+                .map(|value| value <= EPS_ANGLE)
+                .unwrap_or(true)
+        })
+    });
+    if duplicate_direction {
+        structural_failure = Some("sample_degenerate".to_owned());
+    } else if transport_volumes.iter().any(|value| *value <= 0.0)
+        || (total_transport_volume - 1.0).abs() > EPS_ABS + EPS_REL
+    {
+        structural_failure = Some("transport_coverage".to_owned());
+    } else if !geometric_certificate || uncovered_physical_mass > EPS_ABS {
+        structural_failure = Some("physical_support_uncovered".to_owned());
+    } else if !physical_positive || !coupling_marginals {
+        structural_failure = Some("physical_marginals".to_owned());
+    } else if coupling_cut_locus {
+        structural_failure = Some("coupling_cut_locus".to_owned());
+    } else if graph_unresolved {
+        structural_failure = Some("graph_unresolved".to_owned());
+    } else if graph_cut_locus {
+        structural_failure = Some("graph_cut_locus".to_owned());
+    } else if !graph_connected {
+        structural_failure = Some("graph_disconnected".to_owned());
+    } else if absorption_cut_locus {
+        structural_failure = Some("absorption_cut_locus".to_owned());
+    }
+
+    Ok(PrefixEvaluation {
+        nodes: nodes.to_vec(),
+        phi: Vec::new(),
+        chi: Vec::new(),
+        coupling,
+        graph_edges,
+        absorption,
+        transport_volumes,
+        physical_volumes,
+        masses,
+        densities,
+        reconstructed_probability: Vec::new(),
+        uncovered_physical_mass,
+        representation_error,
+        structural_pass: structural_failure.is_none(),
+        structural_failure,
+        candidate_score_valid,
+        cubature_leaves: Some(structure.leaves),
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum S2OverlapClass {
+    Zero,
+    Nonzero,
+    Unresolved,
+}
+
+fn s2_overlap_class(fine: f64, error: f64) -> S2OverlapClass {
+    if fine <= EPS_ABS {
+        if fine + error <= EPS_ABS {
+            S2OverlapClass::Zero
+        } else {
+            S2OverlapClass::Unresolved
+        }
+    } else if fine - error > EPS_ABS {
+        S2OverlapClass::Nonzero
+    } else {
+        S2OverlapClass::Unresolved
+    }
+}
+
+fn s2_site_support_certificate(
+    nodes: &[Sample],
+    sites: &[DensitySite],
+    ell: f64,
+) -> Result<bool> {
+    for site in sites {
+        let mut covered = false;
+        for sample in nodes.iter().filter(|sample| sample.role.is_physical()) {
+            if site.direction.angle(&sample.direction)? <= ell - EPS_ANGLE {
+                covered = true;
+                break;
+            }
+        }
+        if !covered {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn s2_coupling_marginals_hold(coupling: &[Vec<f64>], sites: &[DensitySite]) -> bool {
+    for (site_index, site) in sites.iter().enumerate() {
+        let mut sum = KahanSum::default();
+        for row in coupling {
+            sum.add(row[site_index]);
+        }
+        if (sum.total() - site.mu).abs() > EPS_ABS + EPS_REL * site.mu.abs().max(1.0) {
+            return false;
+        }
+    }
+    let total = coupling
+        .iter()
+        .flat_map(|row| row.iter().copied())
+        .fold(KahanSum::default(), |mut sum, value| {
+            sum.add(value);
+            sum
+        })
+        .total();
+    let mass = sites.len() as f64;
+    (total - mass).abs() <= EPS_ABS + EPS_REL * mass.max(1.0)
+}
+
+fn s2_representation_error(
+    nodes: &[Sample],
+    physical_indices: &[usize],
+    density: &S2Density,
+    densities: &[Option<f64>],
+) -> Result<f64> {
+    let support: Vec<S2SupportCap> = density
+        .sites
+        .iter()
+        .map(|site| S2SupportCap::new(site.direction.clone(), density.ell()))
+        .collect::<Result<_>>()?;
+    let physical_density: Vec<f64> = physical_indices
+        .iter()
+        .map(|&index| densities[index].unwrap_or(0.0))
+        .collect();
+    let report = integrate_s2_adaptive(
+        3,
+        &support,
+        |at| {
+            let probability = density.rho_at(at)? / density.total_mass;
+            let chi = physical_chi_at(nodes, physical_indices, density, at)?.0;
+            let mut reconstructed = KahanSum::default();
+            for (weight, sample_density) in chi.iter().zip(&physical_density) {
+                reconstructed.add(*weight * *sample_density);
+            }
+            let reconstructed = reconstructed.total() / density.total_mass;
+            if !probability.is_finite() || probability < 0.0 || !reconstructed.is_finite() {
+                return Err(V2Error::InvalidSampleField(
+                    "S2 reconstruction is non-finite".to_owned(),
+                ));
+            }
+            Ok(vec![
+                probability,
+                reconstructed,
+                0.5 * (probability - reconstructed).abs(),
+            ])
+        },
+        |cell| {
+            let rho_upper = s2_rho_upper_bound(cell, density)?;
+            let p_bound = rho_upper / density.total_mass;
+            let mut reconstructed_upper = KahanSum::default();
+            for (sample_density, &sample_index) in
+                physical_density.iter().zip(physical_indices.iter())
+            {
+                let chi_bound = physical_chi_bound(cell, &nodes[sample_index].direction, density, rho_upper)?;
+                reconstructed_upper.add(*sample_density * chi_bound);
+            }
+            let reconstructed_bound = reconstructed_upper.total() / density.total_mass;
+            Ok(vec![
+                p_bound,
+                reconstructed_bound,
+                0.5 * (p_bound + reconstructed_bound),
+            ])
+        },
+    )?;
+    let probability_mass = report.fine_values[0];
+    let tv = report.fine_values[2];
+    if !tv.is_finite() || tv < 0.0 {
+        return Err(V2Error::InvalidSampleField(
+            "S2 representation error is non-finite".to_owned(),
+        ));
+    }
+    let mass_tolerance = EPS_QUADRATURE + EPS_REL * 1.0;
+    if (probability_mass - 1.0).abs() > mass_tolerance + report.error_bounds[0] {
+        return Err(V2Error::InvalidSampleField(
+            "S2 density does not integrate to one".to_owned(),
+        ));
+    }
+    Ok(tv)
+}
+
+fn s2_structure_support(nodes: &[Sample], density: &S2Density) -> Result<Vec<S2SupportCap>> {
+    let mut caps = Vec::new();
+    for site in &density.sites {
+        caps.push(S2SupportCap::new(site.direction.clone(), density.ell())?);
+    }
+    for sample in nodes {
+        caps.push(S2SupportCap::new(
+            sample.direction.clone(),
+            sample.transport_radius.min(std::f64::consts::PI),
+        )?);
+        if sample.role.is_physical() {
+            caps.push(S2SupportCap::new(
+                sample.direction.clone(),
+                (2.0 * density.ell()).min(std::f64::consts::PI),
+            )?);
+        }
+    }
+    Ok(caps)
+}
+
+fn evaluate_s2_structure_integrand(
+    at: &Direction,
+    nodes: &[Sample],
+    physical_indices: &[usize],
+    density: &S2Density,
+    layout: &S2StructureLayout,
+) -> Result<Vec<f64>> {
+    let phi = transport_phi_at(nodes, at)?;
+    let (chi, hole) = physical_chi_at(nodes, physical_indices, density, at)?;
+    let rho = density.rho_at(at)?;
+    let mut values = vec![0.0; layout.component_count];
+    for (sample_index, weight) in phi.iter().enumerate() {
+        values[sample_index] = *weight;
+    }
+    for low in 0..layout.sample_count {
+        for high in (low + 1)..layout.sample_count {
+            values[layout.overlap(low, high)] = phi[low] * phi[high];
+        }
+    }
+    for (physical_position, _) in physical_indices.iter().enumerate() {
+        values[layout.vp_offset + physical_position] = chi[physical_position];
+        for (site_index, site) in density.sites.iter().enumerate() {
+            values[layout.coupling(physical_position, site_index)] =
+                chi[physical_position] * site.mu * density.kernel_at(at, site)?;
+        }
+    }
+    values[layout.uncovered_offset] = if hole { rho } else { 0.0 };
+    for owner in 0..layout.sample_count {
+        for absorber_position in 0..layout.physical_count {
+            values[layout.phi_chi(owner, absorber_position)] =
+                phi[owner] * chi[absorber_position];
+        }
+    }
+    Ok(values)
+}
+
+fn s2_structure_activity_bounds(
+    cell: &S2CubatureCell,
+    nodes: &[Sample],
+    physical_indices: &[usize],
+    density: &S2Density,
+    layout: &S2StructureLayout,
+) -> Result<Vec<f64>> {
+    let mut bounds = vec![0.0; layout.component_count];
+    let mut phi_bounds = Vec::with_capacity(layout.sample_count);
+    for sample in nodes {
+        let d_min = cell_d_min(cell, &sample.direction)?;
+        phi_bounds.push(partition_component_bound(d_min, sample.transport_radius)?);
+    }
+    for (sample_index, bound) in phi_bounds.iter().enumerate() {
+        bounds[sample_index] = *bound;
+    }
+    for low in 0..layout.sample_count {
+        for high in (low + 1)..layout.sample_count {
+            bounds[layout.overlap(low, high)] = phi_bounds[low] * phi_bounds[high];
+        }
+    }
+
+    let rho_upper = s2_rho_upper_bound(cell, density)?;
+    let mut chi_bounds = Vec::with_capacity(layout.physical_count);
+    for (physical_position, &sample_index) in physical_indices.iter().enumerate() {
+        let chi_bound =
+            physical_chi_bound(cell, &nodes[sample_index].direction, density, rho_upper)?;
+        chi_bounds.push(chi_bound);
+        bounds[layout.vp_offset + physical_position] = chi_bound;
+        for (site_index, site) in density.sites.iter().enumerate() {
+            let d_min = cell_d_min(cell, &site.direction)?;
+            bounds[layout.coupling(physical_position, site_index)] =
+                chi_bound * site.mu * s2_kernel_value(density.normalization, d_min)?;
+        }
+    }
+    bounds[layout.uncovered_offset] =
+        s2_uncovered_upper_bound(cell, nodes, physical_indices, density, rho_upper)?;
+    for owner in 0..layout.sample_count {
+        for absorber_position in 0..layout.physical_count {
+            bounds[layout.phi_chi(owner, absorber_position)] =
+                phi_bounds[owner] * chi_bounds[absorber_position];
+        }
+    }
+    Ok(bounds)
+}
+
+fn physical_chi_bound(
+    cell: &S2CubatureCell,
+    sample_direction: &Direction,
+    density: &S2Density,
+    rho_upper: f64,
+) -> Result<f64> {
+    if rho_upper == 0.0 {
+        return Ok(0.0);
+    }
+    let d_min = cell_d_min(cell, sample_direction)?;
+    partition_component_bound(d_min, 2.0 * density.ell())
+}
+
+fn s2_uncovered_upper_bound(
+    cell: &S2CubatureCell,
+    nodes: &[Sample],
+    physical_indices: &[usize],
+    density: &S2Density,
+    rho_upper: f64,
+) -> Result<f64> {
+    if rho_upper == 0.0 {
+        return Ok(0.0);
+    }
+    let center = cell.center()?;
+    let radius = cell.conservative_radius();
+    let physical_radius = 2.0 * density.ell();
+    for &sample_index in physical_indices {
+        let d_max = (center.angle(&nodes[sample_index].direction)? + radius).min(std::f64::consts::PI);
+        if d_max < physical_radius {
+            return Ok(0.0);
+        }
+    }
+    Ok(rho_upper)
+}
+
+fn partition_component_bound(d_min: f64, radius: f64) -> Result<f64> {
+    if WendlandC2.profile(d_min / radius)? == 0.0 {
+        Ok(0.0)
+    } else {
+        Ok(1.0)
+    }
+}
+
+fn s2_rho_upper_bound(cell: &S2CubatureCell, density: &S2Density) -> Result<f64> {
+    let mut sum = KahanSum::default();
+    for site in &density.sites {
+        let d_min = cell_d_min(cell, &site.direction)?;
+        sum.add(site.mu * s2_kernel_value(density.normalization, d_min)?);
+    }
+    finite_nonnegative(sum.total(), "S2 density activity bound")
+}
+
+fn cell_d_min(cell: &S2CubatureCell, center: &Direction) -> Result<f64> {
+    Ok((cell.center()?.angle(center)? - cell.conservative_radius()).max(0.0))
+}
+
+fn transport_phi_at(nodes: &[Sample], at: &Direction) -> Result<Vec<f64>> {
+    let logs = nodes
+        .iter()
+        .map(|sample| {
+            if !sample.transport_radius.is_finite() || sample.transport_radius <= 0.0 {
+                return Err(V2Error::InvalidSampleField(
+                    "transport radius must be finite and positive".to_owned(),
+                ));
+            }
+            WendlandC2.log_profile(at.angle(&sample.direction)? / sample.transport_radius)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    normalized_profile_weights(logs)?.ok_or_else(|| {
+        V2Error::InvalidSampleField("transport responsibility vanished on S2".to_owned())
+    })
+}
+
+fn physical_chi_at(
+    nodes: &[Sample],
+    physical_indices: &[usize],
+    density: &S2Density,
+    at: &Direction,
+) -> Result<(Vec<f64>, bool)> {
+    if physical_indices.is_empty() || !density.support_positive(at)? {
+        return Ok((vec![0.0; physical_indices.len()], true));
+    }
+    let logs = physical_indices
+        .iter()
+        .map(|&sample_index| {
+            WendlandC2.log_profile(
+                at.angle(&nodes[sample_index].direction)? / (2.0 * density.ell()),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    match normalized_profile_weights(logs)? {
+        Some(weights) => Ok((weights, false)),
+        None => Ok((vec![0.0; physical_indices.len()], true)),
+    }
 }
 
 fn build_candidates(sites: &[DensitySite]) -> Result<Vec<Candidate>> {
@@ -1130,17 +1921,99 @@ mod tests {
         ]
     }
 
+    fn s2_site(id: u64, coords: [f64; 3]) -> DensitySite {
+        DensitySite {
+            id,
+            geometry_gauge_rank: id,
+            direction: Direction::new(coords.to_vec()).expect("S2 direction"),
+            mu: 1.0,
+        }
+    }
+
     #[test]
-    fn physics_backend_is_explicitly_unavailable() {
+    fn physics_empty_sites_are_infeasible() {
         let version = FieldVersion::physics_reference_s2(8).expect("version");
         let scale = ScaleLevel::from_level(2).expect("scale");
         let outcome = project_sample_field(&version, scale, &[]).expect("outcome");
-        assert_eq!(outcome.status, ProjectionStatus::Unavailable);
+        assert_eq!(outcome.status, ProjectionStatus::Infeasible);
         assert_eq!(
             outcome.failure_code.as_deref(),
-            Some("sample_projection_unavailable_s2")
+            Some("empty_density_sites")
         );
         assert!(outcome.sample_field.is_none());
+    }
+
+    #[test]
+    fn s2_projection_is_deterministic_and_no_longer_unavailable() {
+        let version = FieldVersion::physics_reference_s2(8).expect("version");
+        let scale = ScaleLevel::from_level(0).expect("scale");
+        let sites = vec![s2_site(0, [0.0, 0.0, 1.0])];
+        let first = project_s2_sample_field(&version, scale, &sites).expect("projection");
+        let second = project_s2_sample_field(&version, scale, &sites).expect("projection");
+        assert_eq!(first.status, second.status);
+        assert_eq!(first.n_req, second.n_req);
+        assert_eq!(first.representation_error, second.representation_error);
+        assert_eq!(first.failure_code, second.failure_code);
+        assert_eq!(first.witness_candidate_keys, second.witness_candidate_keys);
+        assert_ne!(
+            first.failure_code.as_deref(),
+            Some("sample_projection_unavailable_s2")
+        );
+        assert!(matches!(
+            first.status,
+            ProjectionStatus::Available | ProjectionStatus::Infeasible
+        ));
+        if first.status == ProjectionStatus::Infeasible {
+            assert_eq!(
+                first.failure_code.as_deref(),
+                Some("projection_candidate_exhausted")
+            );
+            assert!(first.sample_field.is_none());
+            assert!(!first.witness_candidate_keys.is_empty());
+        }
+    }
+
+    #[test]
+    fn s2_promoted_carrier_prefix_has_cubature_leaves_and_coupling() {
+        let scale = ScaleLevel::from_level(0).expect("scale");
+        let sites = vec![s2_site(0, [0.0, 0.0, 1.0])];
+        let density = S2Density::build(scale, &sites).expect("density");
+        let candidates = build_candidates(&sites).expect("candidates");
+        let mut nodes = vec![candidates[0].as_carrier(0), candidates[1].as_carrier(1)];
+        let physical = candidates
+            .iter()
+            .find(|candidate| candidate.key == (1, 0, 0))
+            .expect("site candidate");
+        nodes = apply_candidate(&nodes, physical, scale.ell())
+            .expect("apply")
+            .expect("promotion");
+        let evaluation = evaluate_s2_prefix(scale, &density, &mut nodes).expect("prefix");
+
+        assert!(evaluation.structural_pass, "{:?}", evaluation.structural_failure);
+        assert_eq!(evaluation.uncovered_physical_mass, 0.0);
+        assert!(evaluation.representation_error.is_finite());
+        assert!(evaluation.candidate_score_valid);
+        assert!(evaluation
+            .cubature_leaves
+            .as_ref()
+            .is_some_and(|leaves| !leaves.is_empty()));
+
+        let mut transport_sum = KahanSum::default();
+        for volume in &evaluation.transport_volumes {
+            assert!(*volume > 0.0);
+            transport_sum.add(*volume);
+        }
+        assert!((transport_sum.total() - 1.0).abs() <= EPS_ABS + EPS_REL);
+        assert_eq!(evaluation.coupling.len(), 1);
+        assert!(
+            (evaluation.coupling[0][0] - 1.0).abs() <= EPS_ABS + EPS_REL,
+            "coupling={}",
+            evaluation.coupling[0][0]
+        );
+        assert!(evaluation.masses[0].is_some_and(|mass| (mass - 1.0).abs() <= EPS_ABS + EPS_REL));
+        assert!(evaluation.physical_volumes[0].is_some_and(|volume| volume > 0.0));
+        assert!(evaluation.masses[1].is_none());
+        assert!(!evaluation.graph_edges.is_empty());
     }
 
     #[test]
