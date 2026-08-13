@@ -4,8 +4,8 @@ Status: active
 Owner: field-memory
 Last updated: 2026-08-13
 Scope: v2 的 DensitySite、density、Sample、守恒运输、Response 反馈与事件步验证；不验证旧 v1 引擎或 retrieval 质量
-Related code: 计划中的独立 `crates/core/field-mem-v2`、`crates/ext-v2-cli` 及其测试
-Related docs: [v2 实现契约](field-memory-v2-implementation-contract.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[Sample 投影、覆盖责任与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
+Related code: 独立 `crates/core/field-mem-v2`、`crates/ext-v2-cli` 及其测试；当前实现边界见 Phase 0 handoff
+Related docs: [v2 实现契约](field-memory-v2-implementation-contract.md)、[v2 Phase 0 handoff](2026-08-13-v2-phase0-handoff.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[Sample 投影、覆盖责任与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
 
 ## 1. 目的与边界
 
@@ -104,6 +104,14 @@ reference 提供机械 aggregate diagnostic；没有 Event、DensitySite、physi
 ## 3. 受控执行协议
 
 ### 3.1 前置条件与实现就绪门禁
+
+截至 2026-08-13，accepted contract 已解锁独立 v2 实现，代码检查点
+`0aa9b45228ff60a8de2cbbf8b21c477b82eb3feb` 已完成 numeric/geometry/version/
+event/persistence/kernel 与 geometry-only resolution primitive，并通过 33 个串行 lib
+tests 及 strict clippy。Sample projection、\(\phi/\chi\)、transport、Response、两相
+step、CLI 命令和 artifact runner 尚未实现，所以 **Phase 0 仍未通过**。精确完成边界、
+已知风险和续接顺序以 [Phase 0 handoff](2026-08-13-v2-phase0-handoff.md) 为准；任何
+实施者不得把该 primitive checkpoint 当成阶段解锁 artifact。
 
 implementation contract 的 artifact schema 还必须同时冻结 `backend_kind`、`space_kind`、embedding/projection provenance 与生产/参考空间互斥校验。
 

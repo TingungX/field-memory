@@ -1,5 +1,17 @@
 # v2 validation fixtures
 
+## Implementation checkpoint
+
+The accepted implementation contract currently has SHA-256
+`e9bc3e6960139139a1cb10158b997ffb2dec23069400ca631dd971ebf84fd2b8` and
+algorithm id `fm-v2c-wendland-residual-edge-fvm-v2`.  The Rust checkpoint at
+commit `0aa9b45228ff60a8de2cbbf8b21c477b82eb3feb` implements only Phase 0
+primitives.  Sample projection, transport coverage `phi`, physical
+responsibility `chi`, coupling, transport, Response, two-phase steps, and the
+artifact runner are not implemented, so this directory must not report a
+Phase 0 pass.  The exact implementation boundary and resume order are recorded
+in `../../docs/specs/2026-08-13-v2-phase0-handoff.md`.
+
 The canonical validation artifact schema is `artifact-schema-v1.json`, with
 SHA-256 `4481c5ad3234b594df3c578c03af5931beed3e158367b7ccb63376fef76c457a`.
 Runners and validators must reject any different schema byte stream instead of

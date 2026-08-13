@@ -8,6 +8,7 @@
 - [v2 生产维度保真实验报告](reports/2026-08-12-v2-dimension-fidelity.md)（formal artifact 已验证；384 已被接受为当前生产语义维度）
 - [v2 分阶段验证计划](specs/2026-08-10-field-memory-v2-validation-plan.md)（active；从解析性质到 64–512 大场梯度；1,024 受门禁控制）
 - [v2 实现契约](specs/field-memory-v2-implementation-contract.md)（accepted；v2 唯一实现算法、wire schema、命令与阶段门禁，独立 v2 框架实现已解锁）
+- [v2 Phase 0 检查点 handoff](specs/2026-08-13-v2-phase0-handoff.md)（active；独立 crate 的 primitive、验证证据、明确未完成边界与续接顺序；不得解读为 Phase 0 已通过）
 - [v2 可行性规模验证报告](reports/2026-08-09-v2-feasibility.md)（旧观察骨架的规模证据，不作为当前理论实现或验收基线）
 - [v2 设计草案](superpowers/specs/2026-07-04-field-memory-v2-design.md)（superseded 思想演进稿；不可作为实现规范）
 - [v1 冻结实现设计](design.md)（superseded；Anchor/impact 路径，仅用于维护现有实现）
