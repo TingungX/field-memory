@@ -1,0 +1,13 @@
+[package]
+name = "field-mem-v2-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "field-mem-v2"
+path = "src/main.rs"
+
+[dependencies]
+field-mem-v2 = { path = "../core/field-mem-v2" }
