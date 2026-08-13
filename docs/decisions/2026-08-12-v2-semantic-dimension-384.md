@@ -41,6 +41,7 @@ D_{\rm semantic}=384,
 | model digest | `7907646426070047a77226ac3e684fbbe8410524f7b4a74d02837e43f2146bab` |
 | dataset SHA-256 | `ed5a9836f277ea8242fce0bd477363bb21e81d606226dc607b92554d7b7d9901` |
 | projection family | Build-only uncentered spherical PCA；投影后 L2 normalize |
+| projection bundle archive SHA-256 | `2ba52a192937c9d4f8b6ab34980cf733539c9417af1b4db7c5c9ae636d80dd68` |
 | projection bundle content SHA-256 | `17f2932d84ce59107e1f080ddd9279e30390fc6822f41a89f75b72a5cd8cbc11` |
 | target projection | 上述 bundle 的前 384 个已冻结分量 |
 
@@ -82,3 +83,11 @@ No-Go。`physics_reference_s2` 继续只作为严格动力学 reference backend�
 - 生产持久化不得把不同 embedding/projection 身份的 EventCoordinate 混入同一场；
 - 维度问题已经闭合，下一阶段只需讨论和冻结尚未接受的 v2 动力学实现契约；
 - 在 implementation contract 被 accepted 前，仍不得开始 v2 动力学框架实现。
+
+### 后续状态（2026-08-13）
+
+上述 No-Go 是本 ADR 接受时的阶段门，不是永久禁止。独立
+[`field-memory v2 实现契约`](../specs/field-memory-v2-implementation-contract.md)
+现已 accepted；它完整引用并冻结本 ADR 的 384D identity，因此独立 v2 框架实现
+已经解锁。此状态说明不改写本 ADR 当时的非决策边界：维度实验本身仍不证明
+density、transport 或长期动力学正确。

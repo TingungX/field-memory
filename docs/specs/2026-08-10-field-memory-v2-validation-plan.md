@@ -1,11 +1,11 @@
 # field-memory v2 验证计划：从不变量到大场动力学
 
-Status: draft
+Status: active
 Owner: field-memory
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 Scope: v2 的 DensitySite、density、Sample、守恒运输、Response 反馈与事件步验证；不验证旧 v1 引擎或 retrieval 质量
-Related code: 计划中的 `crates/core/field-mem-core` v2 实现与其测试；当前尚无实现
-Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
+Related code: 计划中的独立 `crates/core/field-mem-v2`、`crates/ext-v2-cli` 及其测试
+Related docs: [v2 实现契约](field-memory-v2-implementation-contract.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[Sample 投影、覆盖责任与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)、[生产维度保真实验](2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 可行性规模验证报告](../reports/2026-08-09-v2-feasibility.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)
 
 ## 1. 目的与边界
 
@@ -17,9 +17,13 @@ Related docs: [v2 理论基石](../design/field-memory-v2-foundations.md)、[v2 
 EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoordinate.
 \]
 
-尤其不允许为了让测试通过而让外部扰动、DensitySite、原始 density、CoordinateLog 或 EventContent 直接改写 EventCoordinate。测试中的 `physics_reference_s2` backend 固定使用 \(S^2\) 与合成 density；这不是将三维环境向量当作生产场，而是使不变量有可精确判定的参考解。生产维度必须先通过独立真实 embedding 保真实验，不能由本计划的物理测试倒推。
+尤其不允许为了让测试通过而让外部扰动、DensitySite、原始 density、CoordinateLog 或 EventContent 直接改写 EventCoordinate。测试中的 `physics_reference_s2` backend 固定使用 \(S^2\) 与合成 density；这不是将三维环境向量当作生产场，而是连续几何、守恒运输与细化趋势的可审计 reference。生产维度必须先通过独立真实 embedding 保真实验，不能由本计划的物理测试倒推。
 
-本计划只定义 v2 动力学验证方案，不把任何待实现的离散公式伪装成已确认理论。生产维度实验使用独立 runner、artifact 与结论，不混入 Phase 0–4。
+`semantic384` 则是当前冻结投影上的有限 density-derived Sample graph operational
+model：它验证因果链、账本、gauge-observable、持久化和事件步边界，不把固定 \(K\)
+的结果报告为 \(S^{383}\) continuum convergence。本计划只定义 v2 动力学验证方案，
+不把任何待实现的离散公式伪装成已确认理论。生产维度实验使用独立 runner、artifact
+与结论，不混入 Phase 0–4。
 
 ## 2. 术语、观测量与通过规则
 
@@ -31,10 +35,26 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 |---|---:|---|---|
 | DensitySite 数 | \(N_{site}=|C_{t,K}|\) | 当前几何在 \((K,X_t)\) 派生尺度下的可区分单位数 | 独立配置、Event 行数或 Content 重数 |
 | Sample 预算 | \(K\) | 场版本的物理分辨率上限；实际 \(|S_{t,K}|\le K\) | 可按负载改变的硬件旋钮、绝对 density 或参与单位数 |
-| Sample 结构权重 | \(w_{src,j}=m_j/\mathcal M\) | Sample \(j\) 在本相冻结场中代表的绝对结构份额，\(\mathcal M=\sum_jm_j\)；规范化当前场中 \(\mathcal M=N_{site}\) | Response 回分配份额或 Event 行数 |
+| Physical Sample 结构权重 | \(w_{src,j}=m_j/\mathcal M\) | Physical Sample \(j\) 在本相冻结场中代表的绝对结构份额，\(\mathcal M=\sum_{j\in\mathcal P}m_j\)；规范化当前场中 \(\mathcal M=N_{site}\) | Carrier 权重、Response 回分配份额或 Event 行数 |
 | 有效参与度 | \(N_{eff}=1/\sum_i r_i^2\) | 本次 closed Response 回分配到几何单位的集中程度，\(r_i=a_i/\sum_k a_k\) | raw Event 数、K、Nsite 或 source weight |
 
-`w_src` 是前向 density-to-Sample 投影的结构权重，`r_i` 是吸收后由 Sample Response 回分配得到的闭合 Response 份额；两者必须并列记录，绝不能互换。`w_src` 可在无吸收时存在；若 \(\sum_i a_i=0\)，则结果必须写 `N_eff: null` 并注明“无吸收/无参与”，不得填零或无穷大。对于带有 signed direction-moment 的阶段，`r_i` 只使用非负标量吸收量 \(a_i\)，不使用向量范数或带符号分量。
+`w_src` 是前向 density-to-Physical-Sample 投影的结构权重，`r_i` 是吸收后由
+Physical Sample Response 回分配得到的闭合 Response 份额；两者必须并列记录，绝不
+能互换。`w_src` 可在无吸收时存在；若 \(\sum_i a_i=0\)，则结果必须写
+`N_eff: null` 并注明“无吸收/无参与”，不得填零或无穷大。对于带有 signed
+direction-moment 的阶段，`r_i` 只使用非负标量吸收量 \(a_i\)，不使用向量范数或
+带符号分量。
+
+每个 SampleField 还必须显式区分以下不属于“规模量”的两个责任：
+
+- transport coverage \(\phi\) 在全体 \(\mathcal T=\mathcal P\cup\mathcal C\) 上构成
+  partition of unity，定义承运 volume 与 graph；
+- physical responsibility \(\chi\) 只在 Physical Sample 集 \(\mathcal P\) 上定义，
+  定义 density、mass、吸收、Response 与 scatter coupling。Carrier 集 \(\mathcal C\)
+  只有 \(\phi\)，严格为零 physical mass，不是低 density 或 background mass。
+
+任何 artifact 若只写一个未标注责任的 `coverage`/`volume`/`density` 字段，均不足以
+证明 v2c 的表示边界；必须标明 `transport_*` 或 `physical_*`。
 
 ### 2.2 数值判定
 
@@ -51,12 +71,13 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 
 ### 2.3 需要的标准 fixtures
 
-固定 seed 生成并版本化以下 fixture family；每个 fixture 以名称、维度、\(K\)、坐标、density 参数和 seed 表示，并记录由 \(\mathcal G_K\) 得到的 `derived_scale`，不得把它作为输入参数。
+固定 seed 生成并版本化以下 fixture family；每个 fixture 以名称、维度、\(K\)、坐标、density 参数和 seed 表示，并记录由 \(\mathcal G_K\) 得到的 `derived_scale`，不得把它作为输入参数。每个 fixture object 还必须显式包含 `backend_kind`、`space_kind` 与 `embedding_identity`；当前全部为 `physics_reference` / `physics_reference_s2` / `null`，包括 direct 与 analytic fixture，禁止由 runner 根据 origin 猜测或补全这些身份。
 
 | family | 用途 |
 |---|---|
 | `empty` | 无 Event 的初始化边界；不得进入正常 Sample 生成或事件步 |
-| `vacuum_transport` | 直接在 Sample 层构造的零 density 诊断场；只验证 raw transport，不代表 \(\rho=Mp\) 的正常场 |
+| `vacuum_transport` | 直接在 Sample 层构造的零 physical density 诊断场；可保留 Carrier transport coverage，只验证 raw transport，不代表 \(\rho=Mp\) 的正常场 |
+| `uniform_ray_oracle` | `origin=analytic_reference` 的 S2 连续 ray oracle；固定 \(\rho=1\)、\(\sigma=1/\pi\)、source \(q\) 与切向 ray directions，验证整条角路径 residual \(e^{-1}\)；不构造 state/Sample graph，也不进入 readiness、activation 或 persistence |
 | `single_site` | 单一 density 结构、均匀路径的指数吸收参考 |
 | `symmetric_pair` / `antipodal` | 对称吸收、零一阶方向矩、对点边界 |
 | `uniform_shell` | 常 density、精确细分不变性与 K 检验 |
@@ -67,17 +88,30 @@ EventCoordinate \to DensitySite \to Density \to Sample \to Response \to EventCoo
 
 随机 fixture 只能补充这些确定性 fixture，不能替代它们。所有随机测试使用同一 PRNG 算法、固定 `FM_V2_SEED` 和显式派生子 seed；失败时打印可单独重放的 seed。
 
+`uniform_ray_oracle` 的已提交 shape 是 `dimension=3`、
+`backend_kind="physics_reference"`、`space_kind="physics_reference_s2"`、
+`embedding_identity=null`、`K=null`、`density={kind:"uniform", value:1}`、
+`sigma=1/pi`、`source={q, initial_total_influence}` 与逐条物化的
+`rays[]={ray_id, omega, normalized_angular_weight,
+expected_path_length_rad, expected_optical_thickness, expected_raw_residual}`。
+四条 ray 的 normalized angular weight 都是 `0.25`；每条独立的 residual 为
+\(e^{-1}\)，而 `ray_aggregate` 的离散加权 residual
+\(\sum_r w_r\,residual_r\) 也必须为 \(e^{-1}\)。它只向 S2 continuous ray
+reference 提供机械 aggregate diagnostic；没有 Event、DensitySite、physical Sample
+或 finite graph，不能被 runner 升格为 state fixture 或任一 lifecycle/persistence
+输入。
+
 ## 3. 受控执行协议
 
 ### 3.1 前置条件与实现就绪门禁
 
 implementation contract 的 artifact schema 还必须同时冻结 `backend_kind`、`space_kind`、embedding/projection provenance 与生产/参考空间互斥校验。
 
-本文是验证计划，不是可直接执行的 implementation handoff。开始编写 v2 框架前，固定路径 `docs/specs/field-memory-v2-implementation-contract.md` 必须存在且标记为 `Status: accepted`，并至少冻结：独立 v2 crate/module/file manifest 与持久化版本；`f64`/生产维度/单位；\(\mathcal G_K\)、\(\mathcal C_{\ell_t^K}\)、kernel density、\(\mathcal P_K\) 的唯一算法及 tie-break；coverage/volume/quadrature/coupling；唯一离散 transport 与连续 reference；readout 与 `Building | Active` readiness probe；版本化 fixture 数据与全部容差；artifact schema、runner target 和精确命令。不得重新讨论 v1/v2 是否共用路径，也不得暴露独立 runtime \(\ell\)。
+本文是验证计划，不是可直接执行的 implementation handoff。开始编写 v2 框架前，固定路径 `docs/specs/field-memory-v2-implementation-contract.md` 必须存在且标记为 `Status: accepted`，并至少冻结：独立 v2 crate/module/file manifest 与持久化版本；`f64`/生产维度/单位；\(\mathcal G_K\)、\(\mathcal C_{\ell_t^K}\)、physical kernel density、\(\mathcal P_K\) 的唯一算法及 tie-break；transport coverage \(\phi\)、physical responsibility \(\chi\)、两类 volume/quadrature/coupling 与 Carrier 零质量规则；唯一离散 transport、edge-carried moment 与连续 reference；readout 与 `Building | Active` readiness probe；版本化 fixture 数据与全部容差；artifact schema、runner target 和精确命令。不得重新讨论 v1/v2 是否共用路径，也不得暴露独立 runtime \(\ell\)。
 
 若该 accepted 契约不存在，任何实施代理——无论能力强弱——都必须返回 `blocked:implementation-contract-missing`。若文件存在但 status 不正确、任一必需章节/数值/schema/命令缺失，或者契约内部与本理论、验证计划冲突，则返回 `blocked:implementation-contract-incomplete`。此时只允许搭建不含算法选择的数学 primitive、账本数据类型或验证器骨架；不得自行选默认公式、用 TODO/ignore 把阶段伪装成完成，或宣布 Phase 0 已可运行。架构选择不能由实施者写进“测试 README”后自行批准。
 
-在开始 Phase 0 前，实施者必须从 accepted contract 逐项核对并原样镜像到测试 README：K-to-scale 分辨率算子、DensitySite 构造器、kernel density、Sample coverage/volume 生成器、同核 coupling、离散运输/吸收实现、Response 回分配，以及自然坍缩与外界反坍缩的 phase contract；同时记录契约文件的 SHA-256。实施者不得新增、修改或“合理化”其中的选择。外界 readout 在外界 Response 形成后、该相 scatter/Exp 反馈前完成；两相更新结束后，才在外界作用点 \(q\) 原位 append Event。若任一项尚未决定或测试 README 与契约 hash/内容不一致，必须按上述 incomplete 状态停止；不得用临时默认参数跨阶段推进。
+在开始 Phase 0 前，实施者必须从 accepted contract 逐项核对并原样镜像到测试 README：K-to-scale 分辨率算子、DensitySite 构造器、physical kernel density、\(\phi\)/\(\chi\) Sample 生成器、两类 volume、Carrier 零物理质量、同核 physical coupling、edge-carried moment 的离散运输/吸收实现、Response 回分配，以及自然坍缩与外界反坍缩的 phase contract；同时记录契约文件的 SHA-256。实施者不得新增、修改或“合理化”其中的选择。外界 readout 在外界 Response 形成后、该相 scatter/Exp 反馈前完成；两相更新结束后，才在外界作用点 \(q\) 原位 append Event。若任一项尚未决定或测试 README 与契约 hash/内容不一致，必须按上述 incomplete 状态停止；不得用临时默认参数跨阶段推进。
 
 生产 backend 必须同时引用 accepted 的
 [生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md) 及其通过
@@ -99,15 +133,15 @@ run_transport(sample_field, source) -> TransportResult
 apply_event_step(state, external_event?) -> EventStepResult
 ```
 
-每个**单源** `TransportResult` 至少暴露冻结 SampleField、raw 预算 `(I0, Ires, a_raw, M_raw)`、closed 预算 `(a, M)`、coverage/volume/density、source id/预算及 transport diagnostics。raw 预算始终验证 \(I_0=I_{res}+\sum_j a_{raw,j}\)。当 \(A_{raw}=\sum_j a_{raw,j}>0\) 时，closed Response 必须在该源内部按已吸收比例重分：
+每个**单源** `TransportResult` 至少暴露冻结 SampleField、raw 预算 `(I0, Ires, a_raw, M_raw)`、closed 预算 `(a, M)`、`transport_coverage`/`transport_volume`、`physical_responsibility`/`physical_volume`/`physical_density`、Sample role count、source id/预算及 transport diagnostics。raw 预算始终验证 \(I_0=I_{res}+\sum_{j\in\mathcal P} a_{raw,j}\)。当 \(A_{raw}=\sum_{j\in\mathcal P} a_{raw,j}>0\) 时，closed Response 必须在该源内部按已吸收比例重分：
 
 \[
 a_j=I_0\frac{a_{raw,j}}{A_{raw}},\qquad
 \mathbf M_j=I_0\frac{\mathbf M_{raw,j}}{A_{raw}},\qquad
-\sum_ja_j=I_0.
+\sum_{j\in\mathcal P}a_j=I_0.
 \]
 
-当 \(A_{raw}=0\) 时不得定义 closed Response、不得执行 scatter/Exp，也不得启动正常动力学。自然相包含多个 Sample 源时，每个源都必须保留独立 raw/closed 子账本，然后才能按 \(w_{src}\) 聚合；不允许先聚合 raw 残余再统一闭合。任一正质量自然源出现 \(A_{raw}=0\) 都阻断整个事件步，不能丢弃该源或把其预算重分给其他源；外界源为零吸收时同样阻断。`EventStepResult` 还必须暴露两相各自的 SampleField、phase 顺序、每个几何单位的 `r_i`、反馈载荷与位移、自然/外界两类贡献、新 Event 在 \(q\) 的插入记录和所有四类规模量。
+当 \(A_{raw}=0\) 时不得定义 closed Response、不得执行 scatter/Exp，也不得启动正常动力学。\(A_{raw}>0\) 时还必须通过固定 SampleField 的 normalized raw Response 细化比较，才可 closed；不得用 `MIN_RAW_ABSORPTION` 一类绝对阈值代替。自然相包含多个正质量 Physical Sample 源时，每个源都必须保留独立 raw/closed 子账本，然后才能按 \(w_{src}\) 聚合；Carrier 不作自然源。不允许先聚合 raw 残余再统一闭合。任一正质量自然源出现 \(A_{raw}=0\) 或细化失败都阻断整个事件步，不能丢弃该源或把其预算重分给其他源；外界源同样阻断。`EventStepResult` 还必须暴露两相各自的 SampleField、phase 顺序、每个几何单位的 `r_i`、反馈载荷与位移、自然/外界两类贡献、新 Event 在 \(q\) 的插入记录和所有四类规模量。
 
 ### 3.2 一次只运行一个阶段
 
@@ -164,22 +198,23 @@ export RAYON_NUM_THREADS=1
 | P0-01 | 状态解析/归一化 | 所有 fixture 及持久化 round-trip | Coordinate 都为有限单位向量；Content 未被修改；非法维度、NaN、负 density 显式报错 |
 | P0-02 | DensitySite 去重 | 同一 Coordinate 上挂 1、2、N 个不同 Content | `N_site`、site geometry、density、Sample field 完全相同；可读 Content 集合增加 |
 | P0-03 | K 派生尺度单调 | 同一支撑集上按 K=64/128/256/512 构建不同分辨率场版本 | K 增大时 `derived_scale` 只变细或不变、`N_site` 不下降、重建/离散误差不增；每个 site 有可审计的跨版本映射；API 无独立 scale 输入 |
-| P0-04 | 全空间/coverage | 从非空 sparse field 生成 Sample；另直接构造 `vacuum_transport` SampleField | \(\phi_j\ge0\)、\(\sum_j\phi_j=1\) 于所有验证点；非空场中无 Event 的方向仍有 coverage；\(V_j>0\) 且 \(\sum_jV_j=|\mathcal D|\)。`empty` 必须返回初始化未完成，不能用未定义的 \(p=\rho/M\) 生成正常 Sample |
+| P0-04 | 全空间/双责任 | 从非空 sparse field 生成 Sample；另直接构造带 Carrier 的 `vacuum_transport` SampleField | normalized measure 下 \(\phi_j\ge0\)、\(\sum_{j\in\mathcal T}\phi_j=1\)、所有 transport volume 为正且和为 1；Physical 支撑上 \(\chi_j\ge0\)、\(\sum_{j\in\mathcal P}\chi_j=1\)，零 physical-density 区所有 \(\chi=0\)。每个 Carrier 的 \(m=\rho=c=a=\mathbf M=0\)，但可有 transport coverage；S² artifact 另验 transport physical-area 之和为 \(4\pi\)。非空场中无 Event 的方向仍有 \(\phi\) coverage；`empty` 必须返回初始化未完成，不能用未定义的 \(p=\rho/M\) 生成正常 Sample |
 | P0-05 | density 单位协变 | 在脱离正常 \(\rho=M p\) 规范的隔离测试中同时缩放 \(\rho,\mu_i,m_j,c_{ji}\mapsto c(\cdot)\)，固定一个 K 场版本 | 明确标记该变换不是另一个合法正常物理状态；Sample geometry 与 `derived_scale` 不变、责任比例不变；恢复规范后 \(\int\rho=N_{site}\) |
-| P0-06 | K 模型族的正确边界 | `uniform_shell` 与 `local_cluster` 的 K=64/128/256/512 梯度 | 不要求不同 K 的 Response 同值；每个 K 版本各自 raw/closed 闭合，K 增大时派生尺度、最大 Sample 直径和 density/测地积分误差不增，并向连续极限收敛；报告而不伪造“同一物理场细化” |
-| P0-07 | 旋转等变 | 旋转 EventCoordinate、作用点和所有可旋转输入 | 对无连续对称性的 fixture，sites 与 SampleField 在允许的稳定置换后只做同一旋转；density probe、coverage 重建、标量 Response、方向矩及更新坐标满足相同等变关系。对 `uniform_shell` 等具有连续稳定子群的 fixture，不比较任意有限 Sample 中心，而比较重建场与可观测量在对称群下不变；误差不超过 `ε_angle` |
+| P0-06 | K 模型族的正确边界 | `uniform_shell` 与 `local_cluster` 的 K=64/128/256/512 梯度 | 不要求不同 K 的 Response 同值；每个 K 版本各自 raw/closed 闭合。仅 `physics_reference_s2` 要求 K 增大时派生尺度、最大 Sample 直径和 density/测地积分误差不增并报告向连续 reference 的趋势；`semantic384` 只验有限 operational invariant，不伪造 \(S^{383}\) 细化结论 |
+| P0-07 | 旋转等变 | 旋转 EventCoordinate、作用点和所有可旋转输入 | 对无连续对称性的 fixture，sites 与 \(\phi/\chi\) SampleField 在允许的稳定置换后只做同一旋转；density/coverage 重建、Carrier 零质量、标量 Response、edge-carried 方向矩及更新坐标满足同一等变关系。对 `uniform_shell` 等具有连续稳定子群的 fixture，不比较任意有限 Sample 中心，而比较重建场与 gauge-invariant observable；误差不超过 `ε_angle` |
 | P0-08 | 当前态充分性 | 相同当前 Coordinate/Content、不同 CoordinateLog/history | 从 DensitySite 至 EventStepResult 的所有数值与 phase trace 相同 |
-| P0-09 | Sample 充分性/中介性 | 生成同一 SampleField 后改变不可见原始 density/sites；审计函数调用 | transport 结果不变，且 transport 的依赖图只读取 SampleField 与 source |
-| P0-10 | coupling 可行性 | 对所有标准 fixture 构造带局部支撑的 \(c_{ji}\) | 非负 coupling 同时满足几何单位边缘 \(\mu_i\) 与 Sample 边缘 \(m_j\)；若给定 coverage 下不可行，必须显式失败并报告违反的集合/边缘，不能退化成非局部或不守恒 fallback |
-| P0-11 | 初始化门禁 | `empty`、`single_site`、未达门槛的 skewed 场与满足预注册门槛的 `large_balanced` | 未完成初始化的状态不得进入正常两相事件步；达到基于代表性作用点 `N_eff`/集中度的冻结门槛后才允许进入，且不得通过运行期阻尼或降低预算绕过门禁 |
+| P0-09 | Sample 充分性/中介性 | 生成同一 \(\phi,\chi,m,\rho,c\) SampleField 后改变不可见原始 density/sites；审计函数调用 | transport 结果不变，且 transport 的依赖图只读取 SampleField、source 与 versioned backend rule |
+| P0-10 | physical coupling 可行性 | 对所有标准 fixture 构造带局部支撑的 \(c_{ji}\) | 非负 physical coupling 同时满足几何单位边缘 \(\mu_i\) 与 Physical Sample 边缘 \(m_j\)；Carrier 没有 \(c\) row。若给定 \(\chi\) 下不可行，必须显式失败并报告违反的集合/边缘，不能退化成非局部或不守恒 fallback |
+| P0-11 | 初始化门禁 | `empty`、`single_site`、未达门槛的 skewed 场与满足预注册门槛的 `large_balanced` | 未完成初始化的状态不得进入正常两相事件步；达到基于代表性作用点 `N_eff`/集中度、实际 source \(A_{raw}>0\) 及 normalized raw Response 细化稳定的冻结门槛后才允许进入，且不得通过 `MIN_RAW_ABSORPTION`、运行期阻尼或降低预算绕过门禁 |
 
 P0-06 的用意是避免把不同 K 场版本误报成同一物理状态，也避免用“模型族不同”掩盖内部不守恒。每个 K、每个 phase 下必须单独验证 raw 账本
 
 \[
-\left|I_0-I_{res}-\sum_j a_{raw,j}\right|\le\varepsilon_{abs},
+\left|I_0-I_{res}-\sum_{j\in\mathcal P} a_{raw,j}\right|\le\varepsilon_{abs},
 \]
 
-并且仅在 \(A_{raw}>0\) 时验证 closed 账本 \(\left|I_0-\sum_ja_j\right|\le\varepsilon_{abs}\)。
+并且仅在 \(A_{raw}>0\) 且 normalized raw Response 细化通过时验证 closed 账本
+\(\left|I_0-\sum_{j\in\mathcal P}a_j\right|\le\varepsilon_{abs}\)。
 
 ## 5. Phase 1：单机制测试
 
@@ -187,14 +222,14 @@ P0-06 的用意是避免把不同 K 场版本误报成同一物理状态，也�
 
 | 编号 | 机制 | 设计 | 通过条件 |
 |---|---|---|---|
-| P1-01 | 真空运输 | 直接构造 `vacuum_transport` SampleField，给定任意方向 source | 只验证 raw：`sum a_raw=0`、`I_res=I_0`；closed Response、scatter、Exp 与正常动力学均不启动，且无虚假方向矩/位移；不得把该诊断 fixture 当成从空 Event 场生成的正常 Sample |
-| P1-02 | 均匀吸收 | `single_site`/`uniform_shell`，已知路径厚度 | raw 残余符合 \(I_0e^{-\int\kappa_Sdr}\)；raw 吸收按同一次扣减分配、非负且预算闭合；`A_raw>0` 时 closed 按比例重分且 \(\sum a=I_0\) |
-| P1-03 | soft coverage 吸收 | overlap 覆盖中的单段传播 | 先按总 \(\kappa_S\) 扣减一次，再按 \(\phi_j\kappa_j/\kappa_S\) 分配；不得对每个重叠 Sample 重复吸收 |
-| P1-04 | 成对通量 | 两/三 Sample 的内部界面 | 每一内部通量成对反对称；所有 `U_j`、`Q_j` 非负；\(\sum_j(U_j+Q_j)\) 守恒 |
-| P1-05 | 自力排除与对称方向矩 | 一般非径向 soft coverage 下的 source Sample、`antipodal` 与旋转副本 | 自然源 Sample 分配给自身的标量吸收仍进入预算，但方向矩按无自力公理严格置零；对点/完全对称 fixture 可有正吸收量但合计 \(\mathbf M=0\)；不得把 coverage 不对称变成虚假自力或任意方向 |
-| P1-06 | Response 回分配 | 一个 Sample 对 1、2、N 个几何单位的责任矩阵 \(c_{ji}\) | `c>=0`、几何单位列和为 \(\mu_i\)、Sample 行和为 \(m_j\)，且 \(\sum_i\mu_i=\sum_jm_j\)；平行运输回 Sample 后的方向矩和等于原 \(\mathbf M_j\)；\(m_j=0\) 的行不发生除法或反馈 |
+| P1-01 | 真空运输 | 直接构造含 Carrier coverage、零 physical density 的 `vacuum_transport` SampleField，给定任意方向 source | 只验证 raw：`sum a_raw=0`、`I_res=I_0`；Carrier 无 \(\chi,m,\rho,Response\)；closed Response、scatter、Exp 与正常动力学均不启动，且无虚假方向矩/位移；不得把该诊断 fixture 当成从空 Event 场生成的正常 Sample |
+| P1-02 | 均匀吸收 | `uniform_ray_oracle` 只作为 S2 continuous ray reference；`single_site`/`uniform_shell` 另行验证有限 Sample 吸收 | oracle 的每条 \(r\in[0,\pi]\) ray 必有 optical thickness \(1\) 与 raw residual \(I_0e^{-1}\)，四条 ray 的离散 normalized-weight aggregate residual 亦为 \(I_0e^{-1}\)；有限 Sample 的 raw 吸收按同一次扣减分配到 Physical Sample、非负且预算闭合；`A_raw>0` 且 fine/coarse normalized Response 收敛时，closed 按比例重分且 \(\sum_{j\in\mathcal P}a_j=I_0\) |
+| P1-03 | \(\phi\)-\(\chi\) soft 吸收 | Carrier/Physical overlap 的单段传播 | 先按总 \(\kappa_S=\sum_{l\in\mathcal P}\chi_l\kappa_l\) 扣减一次，再按 owner \(\phi_j\) 到 Physical absorber \(\chi_l\kappa_l/\kappa_S\) 的同一责任分解入账；不得对重叠 Sample 重复吸收，也不得给 Carrier 产生 Response |
+| P1-04 | 成对通量与 edge 方向矩 | 两/三 Sample 的内部界面、折线路径与同一场的细化副本 | 每一内部 scalar 通量成对反对称；所有 `U_j`、Physical `Q_l` 非负；\(\sum_{j\in\mathcal T}U_j+\sum_{l\in\mathcal P}Q_l\) 守恒。`W` 随 edge 平行运输且 \(\|W_j\|\le U_j\)；不得在下游以 source-to-center 径向 shortcut 重算 |
+| P1-05 | 自力排除与对称方向矩 | 一般非径向 \(\phi/\chi\) 下的正质量 Physical source、`antipodal` 与旋转副本 | 自然源 Physical Sample 分配给自身的标量吸收仍进入预算，但方向矩按无自力公理严格置零；对点/完全对称 fixture 可有正吸收量但合计 \(\mathbf M=0\)；不得把 coverage 不对称变成虚假自力或任意方向 |
+| P1-06 | Response 回分配 | 一个 Physical Sample 对 1、2、N 个几何单位的责任矩阵 \(c_{ji}\) | `c>=0`、几何单位列和为 \(\mu_i\)、Physical Sample 行和为 \(m_j\)，且 \(\sum_i\mu_i=\sum_{j\in\mathcal P}m_j\)；Carrier 没有 `c` row。平行运输回 Physical Sample 后的方向矩和等于原 \(\mathbf M_j\)；\(m_j=0\) 的行不发生除法或反馈 |
 | P1-07 | 反馈重复不变 | 给一个几何单位增加重复 Content 后重跑 P1-06 | 该单位的载荷、位移和其他几何单位反馈均不变；不能按 Event 行数稀释或放大 |
-| P1-08 | 纯自然坍缩 | 无 external event 的非均匀局部场，并另造一个正质量源零吸收反例 | 每个正质量 Sample 源的 \(w_h^{src}=m_h/\sum_km_k\) 非负且和为 1；每个源分别完成 raw/closed 账本后再聚合；任一正质量源零吸收时整相阻断且不重分预算；正常 fixture 的标量 `a` 始终非负，反馈方向矩严格为 \(-\mathbf M\)，且只来自冻结 Sample Response；不产生 Content 改写或直接 Event 路径 |
+| P1-08 | 纯自然坍缩 | 无 external event 的非均匀局部场，并另造一个正质量 Physical source 零吸收/细化失败反例 | 每个正质量 Physical Sample 源的 \(w_h^{src}=m_h/\sum_{k\in\mathcal P}m_k\) 非负且和为 1；Carrier 不作源。每个源分别完成 raw/closed 账本后再聚合；任一正质量源零吸收或细化失败时整相阻断且不重分预算；正常 fixture 的标量 `a` 始终非负，反馈方向矩严格为 \(-\mathbf M\)，且只来自冻结 Sample Response；不产生 Content 改写或直接 Event 路径 |
 | P1-09 | 纯外界反坍缩 | 冻结自然 phase、向 `local_cluster` 输入一个 event | 外界 phase 的反馈方向矩严格为 \(+\mathbf M\)，且仅经其冻结 Sample 产生；相关区得到的反坍缩贡献高于远区，raw/closed 预算均闭合 |
 | P1-10 | 自然/外界符号分离 | 在同一 fixture 分别运行 P1-08、P1-09，再按两相顺序执行 | 两 phase 的标量吸收均非负；自然贡献为 \(-\mathbf M\)、外界贡献为 \(+\mathbf M\)，不能把符号藏进负吸收；两相各自重建 Sample、各自审计预算和角运动界 |
 
@@ -214,13 +249,13 @@ snapshot current EventCoordinates
 -> append the new Event at q, last
 ```
 
-自然相和外界相不是同一 SampleField 上的两个可交换 contribution，也不得在 scatter 前合并。每相的初始预算为 \(I_0=1\)：raw transport 按 \(1=I_{res}+\sum a_{raw}\) 记录；若有吸收，closed Response 按比例重分后 \(\sum a=1\)，并分别执行 `scatter/Exp`。因此每相在该相冻结的可区分几何单位上都必须满足 \(\sum_i\Delta\theta_i^{phase}\le1\)。自然相后单位集合可能因完整重建而改变，完整事件只审计两个相位路径账本之和 \(L_{event}=L_C+L_A\le2\)，不伪造跨相位固定单位对应。在正常事件步中，任一正质量自然源或外界源无吸收都必须令整步以 `initialization_incomplete` 阻断；只在 P1-01 真空诊断中允许留下 raw transport record 而不启动 closed Response、scatter 或 Exp。
+自然相和外界相不是同一 SampleField 上的两个可交换 contribution，也不得在 scatter 前合并。每相的初始预算为 \(I_0=1\)：raw transport 按 \(1=I_{res}+\sum_{j\in\mathcal P} a_{raw,j}\) 记录；只有 raw absorption 为正且 normalized raw Response 的运输细化通过时，closed Response 才按比例重分至 \(\sum_{j\in\mathcal P}a_j=1\)，并分别执行 `scatter/Exp`。因此每相在该相冻结的可区分几何单位上都必须满足 \(\sum_i\Delta\theta_i^{phase}\le1\)。自然相后单位集合可能因完整重建而改变，完整事件只审计两个相位路径账本之和 \(L_{event}=L_C+L_A\le2\)，不伪造跨相位固定单位对应。在正常事件步中，任一正质量 Physical natural source 或外界 source 零吸收/细化失败都必须令整步以 `initialization_incomplete` 阻断；只在 P1-01 真空诊断中允许留下 raw transport record 而不启动 closed Response、scatter 或 Exp。
 
 | 编号 | 测试 | 输入与操作 | 通过条件 |
 |---|---|---|---|
 | P2-01 | 两相顺序与重建 | 不低于 S64、且实际达到初始化门槛的最小非对称 fixture，带 external event | 自然相 `build/run/scatter/Exp` 完整结束后，必须从中间 EventCoordinates 重建外界 DensitySite/density/Sample；trace 证明外界未复用自然 Sample 或初始 density |
 | P2-02 | readout 与新 Event 最后原位落位 | 对 P2-01 的 event 设置唯一 Content 和 source coordinate \(q\) | readout 读取外界 closed Response，严格早于外界 scatter/Exp；两个相位更新结束后才 append；新 Event 的 Coordinate 精确为 \(q\)，Content 原样保留；它未收到自己的当前步方向力，下一事件步才参与场构建 |
-| P2-03 | 相位方向、零矩与自作用 | 含不对称、source Sample、对点与完全对称两个 fixture | 自然 scatter 使用 \(-\mathbf M\)，外界 scatter 使用 \(+\mathbf M\)；source 的自作用方向矩为零；对点/完全对称汇聚的总方向矩为零；\(\mathbf P_i=0\) 时位移为零，不允许任意补向 |
+| P2-03 | 相位方向、零矩与自作用 | 含不对称、正质量 Physical source、对点与完全对称两个 fixture | 自然 scatter 使用 \(-\mathbf M\)，外界 scatter 使用 \(+\mathbf M\)；source 的自作用方向矩为零；对点/完全对称汇聚的总方向矩为零；\(\mathbf P_i=0\) 时位移为零，不允许任意补向。Carrier 从不作为 Response/scatter 行出现 |
 | P2-04 | 两相预算与角运动界 | 近/远皆有 density 的 fixture | 自然/外界分别通过 raw 与 closed 账本；每相在本相几何单位上 \(\sum_i\Delta\theta_i\le1\)，两相路径账本之和 \(L_C+L_A\le2\)；不得假设重建前后单位一一对应，也不得在两相之间双计或混合 Sample Response |
 | P2-05 | 局部性 | `local_cluster` 中在 q 处重复同一 event，记录角距离 ring | 在该预注册 fixture 上，近区外界反坍缩占优、远区自然坍缩占优，且外界贡献的 ring 统计满足预注册衰减门槛；失败表示当前运输/闭合没有实现所需行为，不得把该 fixture 结论冒充任意 density 上的普适单调定理 |
 | P2-06 | 事件顺序 | 两个非共线 unit-budget external event 的 A→B 与 B→A；另测同方向对照 | 非共线事件允许并应报告顺序差异（读写同一步的结果）；同方向、同单位预算的对照在容差内一致；无 hidden history 时相同最终当前态的下一步响应一致 |
@@ -254,7 +289,7 @@ field、N_eff 和动力学，借此持续检查“内容重数不是几何质量
 
 ### 7.2 必测指标
 
-每个规模点输出：`N_site`、K、`derived_scale` 及推导证据、实际 Sample 最大直径、Sample density/测地积分误差、每相 raw 预算误差/残余预算、每相 closed 预算误差、`w_src`、`r_i`、`N_eff`、Response 份额的 Herfindahl 指数、近/远区贡献、每相和事件总计的平均/中位/最大角位移、每事件 wall time、峰值 RSS、artifact 大小及所有失败/跳过原因。
+每个规模点输出：`N_site`、K、`derived_scale` 及推导证据、`transport_sample_count`、`physical_sample_count`、`carrier_sample_count`、实际 transport Sample 最大直径、density-only 表示误差、仅在 `physics_reference_s2` 适用的测地积分/连续-reference 误差、每相 raw 预算误差/残余预算及 coarse/fine normalized Response 差、每相 closed 预算误差、`w_src`、`r_i`、`N_eff`、Response 份额的 Herfindahl 指数、近/远区贡献、每相和事件总计的平均/中位/最大角位移、每事件 wall time、峰值 RSS、artifact 大小及所有失败/跳过原因。
 
 所有非真空 fixture 先验证一般大场上界。令每相 \(r_i=a_i/I_0\)、\(\Delta\theta_i=d(z_i,z_i')\)，则必须满足：
 
@@ -287,7 +322,7 @@ z_i'=\operatorname{Exp}_{z_i}(\mathbf P_i),
 
 ## 8. Phase 4：受门禁控制的 1,024 压力确认
 
-S1024 不是用来掩盖 512 以下失败的重试。只有 S64、S128、S256、S512 的预算、K 收敛、局部性、动态平衡和位移律均通过，并且 wrapper 确认 S512 峰值 RSS 小于 4 GiB、wall time 小于 30 min 的 70%，才允许启动。否则 Phase 4 的 `status.json` 记 `skipped` 并附阻断 phase/指标；这不是 pass。
+S1024 不是用来掩盖 512 以下失败的重试。只有 S64、S128、S256、S512 的预算、`physics_reference_s2` K/continuous-reference 趋势、局部性、动态平衡和位移律均通过，并且 wrapper 确认 S512 峰值 RSS 小于 4 GiB、wall time 小于 30 min 的 70%，才允许启动。否则 Phase 4 的 `status.json` 记 `skipped` 并附阻断 phase/指标；这不是 pass。`semantic384` 的独立规模确认只验证版本化 finite-graph operational gates，不借用该条件声称高维连续收敛。
 
 Phase 4 依次运行 `large_balanced`、`large_skewed` 与重复 Content 对照，固定
 \(K=1024\) 与 4,096 个不同输入支撑点，`derived_scale` 和 \(N_{site}\) 仍由
@@ -298,68 +333,35 @@ Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即�
 
 ## 9. Artifact、复核与结论格式
 
-每一个 `result.json` 至少包含：
+fixture manifest、`run_manifest.json`、`status.json` 与 `result.json` 的顶层 JSON
+版本键统一为 `"schema_version": 1`。文中可称为 artifact schema version，但不得
+再引入第二个顶层 artifact-version 键。
 
-```json
-{
-  "schema_version": 1,
-  "phase": "phase-2",
-  "fixture": "local_cluster",
- "seed": 20260810,
-  "backend_kind": "physics_reference",
-  "space_kind": "physics_reference_s2",
-  "dimension": 0,
-  "embedding_provenance": null,
-  "derived_scale": {"value": 0.0, "resolution_rule": "", "geometry_sha256": ""},
-  "n_event_rows": 0,
-  "n_density_sites": 0,
-  "sample_budget_k": 0,
-  "sample_count": 0,
-  "source_weights": [],
-  "response_shares": [],
-  "n_eff": null,
-  "natural_sources": [
-    {
-      "source_id": "sample-0",
-      "weight": 0.0,
-      "raw": {
-        "initial": 0.0,
-        "absorbed": 0.0,
-        "residual": 0.0,
-        "moment_l1": 0.0,
-        "error": 0.0
-      },
-      "closed": {
-        "closure_factor": null,
-        "absorbed": null,
-        "moment_l1": null,
-        "scalar_scale_max_error": null,
-        "moment_scale_max_error": null,
-        "error": null
-      },
-      "sample_ledger": {
-        "mode": "full",
-        "path": "natural/source-sample-0.jsonl.zst",
-        "sha256": "",
-        "rows": 0
-      }
-    }
-  ],
-  "natural_budget": {"raw_initial": 1.0, "raw_absorbed": 0.0, "raw_residual": 0.0, "raw_error": 0.0, "closed_absorbed": null, "closed_error": null},
-  "external_budget": {"raw_initial": 1.0, "raw_absorbed": 0.0, "raw_residual": 0.0, "raw_error": 0.0, "closed_absorbed": null, "closed_error": null},
-  "phase_trace": [],
-  "tolerances": {},
-  "resources": {},
-  "status": "pass"
-}
-```
+每一个 `result.json` 必须逐字段通过 committed
+`experiments/v2_validation/artifact-schema-v1.json`；该 JSON Schema 是唯一可执行
+字段表，本计划不再复制一个容易漂移的伪示例。尤其必须包含 schema 所列的
+`document_kind/run_id/batch_id/tier/gates/sidecars`，使用 `derived_resolution` 而非
+`derived_scale` object，并物化全部 tolerance/resource 子键。禁止以空字符串冒充
+SHA、以零维度/零预算冒充真实 pass，或增加 schema 未知字段。
 
-数值 0 只示意 schema，不能作为真实无数据成功。每个自然源的验证流必须逐 Sample 包含 `sample_id`、`a_raw`、`M_raw`、`a_closed` 与 `M_closed`；其 canonical SHA-256、行数和源级汇总必须一致。P0–P2 的 `sample_ledger.mode=full`，保留全部逐源压缩 sidecar。P3–P4 为避免 \(O(K^2D)\) 方向矩把验证进程本身撑爆，允许 `mode=streamed_digest`：每个源仍须在聚合前由在线 validator 逐行验证并留下独立汇总与 digest，同时对预注册的固定审计子集和任一失败源保留完整 sidecar；不能退化成只留 phase 聚合值，也不能在看到结果后挑选审计源。每个 phase 结束再运行离线 artifact validator：检查 schema、有限数值、四类规模量的定义、K-to-scale 推导证据、自然相逐源权重与子账本可重算、每个源的 `closure_factor=I0/A_raw`、完整账本或流式验证证据中的逐 Sample 标量/方向矩缩放、聚合预算、seed、资源记录和 pass/fail 一致性。任一在线或离线 validator 失败都属于该 phase 失败。
+数值 0 只示意 schema，不能作为真实无数据成功。每个自然源的验证流必须逐
+Physical Sample 包含 `sample_id`、`a_raw`、`M_raw`、`a_closed` 与 `M_closed`；
+Carrier 不得出现 Response row。其 canonical SHA-256、行数和源级汇总必须一致。
+P0–P2 的 `sample_ledger.mode=full`，保留全部逐源压缩 sidecar。P3–P4 为避免
+\(O(K^2D)\) 方向矩把验证进程本身撑爆，使用 `mode=streamed_full`：每行在产生时
+写入压缩 JSONL，不把全矩阵驻留内存；离线 validator 仍须完整解压重放全部行。
+不接受只有 digest/汇总而无法离线重算的 `streamed_digest`。每个 phase 结束再运行
+离线 artifact validator：检查 schema、有限数值、四类规模量与 \(\phi/\chi\) role
+的定义、K-to-scale 推导证据、Carrier 零物理质量、自然相逐源权重与子账本可重算、
+每个源的 `closure_factor=I0/A_raw`、raw Response 细化差、逐 Sample 标量/
+edge-carried 方向矩缩放、聚合预算、seed、资源记录和 pass/fail 一致性。任一在线
+或离线 validator 失败都属于该 phase 失败。
 
 最终报告按 phase 给出：通过/失败/跳过、精确命令、git SHA、seed、日志目录、实际规模、最大误差、资源消耗和阻断后的最早失败项。结论必须区分：
 
 - “某个有限 K 的离散账本守恒”；
-- “不同 K 分辨率模型族对连续极限收敛”；
+- “`physics_reference_s2` 中不同 K 分辨率模型族对连续极限收敛”；
+- “`semantic384` 的固定有限 graph 满足 operational invariant（不等于高维连续收敛）”；
 - “大场在实际 N_eff 下呈现 \(O(1/N_eff)\) 单位位移”；
 - “尚未验证/因失败而停止”。
 
@@ -369,4 +371,10 @@ Phase 4 使用独立进程和独立 artifact 目录；任一 fixture 失败即�
 
 建议把测试与实现同模块放置：局部几何/运输单测在对应 Rust 模块的 `#[cfg(test)]`，跨模块事件步和规模 harness 放在独立 integration/experiment target。测试代码的实现顺序必须和本计划 phase 一致：先写 P0 与 P1 的 reference fixtures，再写 P2 的 phase trace，最后接入 P3/P4 受控 runner。任何使用 `DummyEmbedProvider` 的测试都不应证明几何或语义正确性；本计划的核心 fixtures 直接提供归一化 direction，避免 embedding 噪声混入物理判定。
 
-本计划不做以下事情：不改变 v2 理论基石、不选择尚未冻结的 density estimator 或有限体积通量、不引入新的核心物理参数、不迁移旧持久化格式、不重跑 LLM/retrieval benchmark，也不把初始化不足的大场条件用运行期阻尼或小场特例遮蔽。残余的全局比例闭合、新 Event 在 \(q\) 最后落位及两相 Exp 已由理论基石冻结，测试只能验证它们，不能另换终点律。初始化负责建立足够大的认知地形；正常动力学的验收从 S64 起，并以 S512 为必过规模，而不是以 30 个对象的视觉 demo 为准。
+本计划不做以下事情：不改变 v2 理论基石、不在 accepted implementation contract
+之外另选 density estimator、\(\phi/\chi\) 投影或 graph 通量、不引入新的核心物理
+参数、不迁移旧持久化格式、不重跑 LLM/retrieval benchmark，也不把初始化不足的
+大场条件用运行期阻尼、小场特例、density floor 或 `MIN_RAW_ABSORPTION` 遮蔽。
+残余的全局比例闭合、新 Event 在 \(q\) 最后落位及两相 Exp 已由理论基石冻结，
+测试只能验证它们，不能另换终点律。初始化负责建立足够大的认知地形；正常动力学
+的验收从 S64 起，并以 S512 为必过规模，而不是以 30 个对象的视觉 demo 为准。

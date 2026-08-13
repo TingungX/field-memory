@@ -1,0 +1,636 @@
+{
+  "schema_version": 1,
+  "generator_id": "fm-v2-fixtures-v1",
+  "seed": 20260810,
+  "dimension": 3,
+  "scope": "Phase 0 materialized input fixtures plus the Phase 1 analytic S2 ray reference. This manifest contains inputs and assertions, not generated numerical outputs.",
+  "fixtures": [
+    {
+      "fixture_id": "empty",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [],
+      "coordinate_sha256": "37035455e1cf4d4623fdd6940ed18f13665b1e07234190add16b813f1c794e95",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "no_event_coordinates",
+            "kind": "event_count",
+            "value": 0
+          },
+          {
+            "id": "empty_stays_building",
+            "kind": "lifecycle",
+            "value": "Building"
+          }
+        ],
+        "invariants": [
+          "empty state has no GeometryUnit, DensitySite, or SampleField",
+          "readiness cannot report Active for an empty state"
+        ]
+      }
+    },
+    {
+      "fixture_id": "duplicate_coordinate",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [
+        {
+          "event_id": "duplicate-coordinate-001",
+          "coordinate": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "content": "duplicate coordinate: first immutable content",
+          "source": {
+            "kind": "fixture",
+            "source_id": "duplicate-coordinate-a"
+          }
+        },
+        {
+          "event_id": "duplicate-coordinate-002",
+          "coordinate": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "content": "duplicate coordinate: second immutable content",
+          "source": {
+            "kind": "fixture",
+            "source_id": "duplicate-coordinate-b"
+          }
+        }
+      ],
+      "coordinate_sha256": "104575ae015e32f92160977b9d5727cc427e711f31843dfa97c1994278a2727f",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "coincident_coordinate_pair",
+            "kind": "geometry_dedup",
+            "event_ids": [
+              "duplicate-coordinate-001",
+              "duplicate-coordinate-002"
+            ],
+            "expected_geometry_unit_count": 1
+          }
+        ],
+        "invariants": [
+          "distinct EventContent values remain associated with their own EventId",
+          "source metadata and duplicate membership do not change the physical coordinate support",
+          "the duplicate coordinate creates no second physical direction"
+        ]
+      }
+    },
+    {
+      "fixture_id": "orthogonal_basis",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [
+        {
+          "event_id": "orthogonal-basis-001",
+          "coordinate": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "content": "orthogonal basis x",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-x"
+          }
+        },
+        {
+          "event_id": "orthogonal-basis-002",
+          "coordinate": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "content": "orthogonal basis y",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-y"
+          }
+        },
+        {
+          "event_id": "orthogonal-basis-003",
+          "coordinate": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "content": "orthogonal basis z",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-z"
+          }
+        }
+      ],
+      "coordinate_sha256": "3172d20ddcee3a31bbbe4f862a2b02609dd26500edac195ab45106c67fbfa995",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "orthonormal_coordinate_matrix",
+            "kind": "pairwise_dot_products",
+            "value": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        ],
+        "invariants": [
+          "each coordinate is a finite unit vector",
+          "three event coordinates produce three distinct GeometryUnit values"
+        ]
+      }
+    },
+    {
+      "fixture_id": "antipodal",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [
+        {
+          "event_id": "antipodal-001",
+          "coordinate": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "content": "antipodal positive x",
+          "source": {
+            "kind": "fixture",
+            "source_id": "antipodal-positive"
+          }
+        },
+        {
+          "event_id": "antipodal-002",
+          "coordinate": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "content": "antipodal negative x",
+          "source": {
+            "kind": "fixture",
+            "source_id": "antipodal-negative"
+          }
+        }
+      ],
+      "coordinate_sha256": "92ef444ad1551571cf0d32a61cedafe0917f90e7f8fd7005346b1c885616d201",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "antipodal_pair",
+            "kind": "pairwise_dot_products",
+            "value": [
+              [
+                1.0,
+                -1.0
+              ],
+              [
+                -1.0,
+                1.0
+              ]
+            ]
+          }
+        ],
+        "invariants": [
+          "the two coordinates are distinct GeometryUnit values",
+          "cut-locus behavior is exercised explicitly rather than hidden by coordinate normalization"
+        ]
+      }
+    },
+    {
+      "fixture_id": "symmetric_pair",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [
+        {
+          "event_id": "symmetric-pair-001",
+          "coordinate": [
+            0.6,
+            0.8,
+            0.0
+          ],
+          "content": "symmetric pair positive y",
+          "source": {
+            "kind": "fixture",
+            "source_id": "symmetric-pair-positive"
+          }
+        },
+        {
+          "event_id": "symmetric-pair-002",
+          "coordinate": [
+            0.6,
+            -0.8,
+            0.0
+          ],
+          "content": "symmetric pair negative y",
+          "source": {
+            "kind": "fixture",
+            "source_id": "symmetric-pair-negative"
+          }
+        }
+      ],
+      "coordinate_sha256": "ff639602440a5d280f2c5135b234dbfb825630d8a4f4f78327d00be37345346a",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "reflection_about_xz_plane",
+            "kind": "fixed_orthogonal_transform",
+            "matrix": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "event_id_map": {
+              "symmetric-pair-001": "symmetric-pair-002",
+              "symmetric-pair-002": "symmetric-pair-001"
+            }
+          }
+        ],
+        "invariants": [
+          "reflected coordinates have equal norm and equal x/z components",
+          "symmetric observables must agree after the declared event-id permutation"
+        ]
+      }
+    },
+    {
+      "fixture_id": "rotated_copy",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 8,
+      "origin": "state",
+      "lifecycle_allowed": [
+        "Building"
+      ],
+      "events": [
+        {
+          "event_id": "rotated-copy-001",
+          "coordinate": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "content": "orthogonal basis x",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-x"
+          }
+        },
+        {
+          "event_id": "rotated-copy-002",
+          "coordinate": [
+            -1.0,
+            0.0,
+            0.0
+          ],
+          "content": "orthogonal basis y",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-y"
+          }
+        },
+        {
+          "event_id": "rotated-copy-003",
+          "coordinate": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "content": "orthogonal basis z",
+          "source": {
+            "kind": "fixture",
+            "source_id": "orthogonal-basis-z"
+          }
+        }
+      ],
+      "coordinate_sha256": "418c946ff243d98781022c041177e0d470c994f428b817b3efcd37ad5b22e268",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "expected": {
+        "relationships": [
+          {
+            "id": "rotation_of_orthogonal_basis",
+            "kind": "fixed_orthogonal_transform",
+            "source_fixture_id": "orthogonal_basis",
+            "matrix": [
+              [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "event_id_map": {
+              "orthogonal-basis-001": "rotated-copy-001",
+              "orthogonal-basis-002": "rotated-copy-002",
+              "orthogonal-basis-003": "rotated-copy-003"
+            }
+          }
+        ],
+        "invariants": [
+          "coordinates are listed directly and must not be regenerated from the rotation matrix at test time",
+          "label-preserving rotated observables must be equivalent in the versioned gauge"
+        ]
+      }
+    },
+    {
+      "fixture_id": "vacuum_transport",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": 4,
+      "origin": "direct_sample_field",
+      "lifecycle_allowed": [],
+      "events": [],
+      "coordinate_sha256": "b3283b7a9f0d70aeaee9ee3e80ba81d0987e61b66f71a9dfa6a1fed657524633",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "direct_sample_field": {
+        "purpose": "raw_vacuum_only",
+        "actual_sample_count": 2,
+        "unused_sample_capacity": 2,
+        "carrier_gauge": {
+          "b": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "t": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "offset_rad": 0.1
+        },
+        "samples": [
+          {
+            "sample_id": "carrier-0",
+            "role": "carrier",
+            "direction": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "transport_volume": 0.5,
+            "physical_volume": 0.0,
+            "mass": 0.0,
+            "density": 0.0,
+            "coupling_c_row": [],
+            "absorption_a_row": [],
+            "phi_cubature_values": null,
+            "chi_cubature_values": null
+          },
+          {
+            "sample_id": "carrier-1",
+            "role": "carrier",
+            "direction": [
+              -0.9950041652780258,
+              0.09983341664682815,
+              0.0
+            ],
+            "transport_volume": 0.5,
+            "physical_volume": 0.0,
+            "mass": 0.0,
+            "density": 0.0,
+            "coupling_c_row": [],
+            "absorption_a_row": [],
+            "phi_cubature_values": null,
+            "chi_cubature_values": null
+          }
+        ],
+        "physical_sample_ids": [],
+        "physical_masses": [],
+        "physical_densities": [],
+        "coupling_c": [],
+        "absorption_a": [
+          [],
+          []
+        ],
+        "graph": null,
+        "graph_status": "phase0_generated_by_builder",
+        "cubature_status": "phase0_generated_after_build",
+        "raw_input": {
+          "coordinate": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "content": "vacuum external probe",
+          "source": {
+            "kind": "fixture",
+            "source_id": "vacuum-external-probe"
+          },
+          "initial_total_influence": 1.0
+        }
+      },
+      "expected": {
+        "relationships": [
+          {
+            "id": "carrier_transport_volume_partition",
+            "kind": "sum",
+            "field": "direct_sample_field.samples[].transport_volume",
+            "value": 1.0
+          },
+          {
+            "id": "carrier_budget_reserves_unused_capacity",
+            "kind": "sample_budget",
+            "value": {
+              "K": 4,
+              "actual_sample_count": 2,
+              "unused_sample_capacity": 2
+            }
+          },
+          {
+            "id": "no_physical_absorber",
+            "kind": "physical_row_count",
+            "value": 0
+          }
+        ],
+        "invariants": [
+          "both Samples are CarrierSample values and have exact zero physical volume, mass, density, coupling, and absorption rows",
+          "this direct fixture may run raw vacuum transport only",
+          "raw residual equals initial total influence and Response is exactly zero",
+          "readiness, activation, and persistence are forbidden for this direct fixture",
+          "carrier-0 is b=+x and carrier-1 is -cos(0.1)*b + sin(0.1)*t for t=+y, so the two carriers are not an exact antipodal pair",
+          "phi and chi cubature arrays and the graph are intentionally absent until the Phase 0 builder materializes them"
+        ]
+      }
+    },
+    {
+      "fixture_id": "uniform_ray_oracle",
+      "dimension": 3,
+      "backend_kind": "physics_reference",
+      "space_kind": "physics_reference_s2",
+      "embedding_identity": null,
+      "K": null,
+      "origin": "analytic_reference",
+      "lifecycle_allowed": [],
+      "coordinate_sha256": "c4bcf1fe415b1756854d39f2f8379f425db77b5608cfd482c90163702fcc26ab",
+      "coordinate_sha256_status": "canonical_v1_verified",
+      "density": {
+        "kind": "uniform",
+        "value": 1.0
+      },
+      "sigma": 0.3183098861837907,
+      "source": {
+        "q": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "initial_total_influence": 1.0
+      },
+      "rays": [
+        {
+          "ray_id": "q-plus-y",
+          "omega": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "normalized_angular_weight": 0.25,
+          "expected_path_length_rad": 3.141592653589793,
+          "expected_optical_thickness": 1.0,
+          "expected_raw_residual": 0.36787944117144233
+        },
+        {
+          "ray_id": "q-minus-y",
+          "omega": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "normalized_angular_weight": 0.25,
+          "expected_path_length_rad": 3.141592653589793,
+          "expected_optical_thickness": 1.0,
+          "expected_raw_residual": 0.36787944117144233
+        },
+        {
+          "ray_id": "q-plus-z",
+          "omega": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "normalized_angular_weight": 0.25,
+          "expected_path_length_rad": 3.141592653589793,
+          "expected_optical_thickness": 1.0,
+          "expected_raw_residual": 0.36787944117144233
+        },
+        {
+          "ray_id": "q-minus-z",
+          "omega": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "normalized_angular_weight": 0.25,
+          "expected_path_length_rad": 3.141592653589793,
+          "expected_optical_thickness": 1.0,
+          "expected_raw_residual": 0.36787944117144233
+        }
+      ],
+      "ray_aggregate": {
+        "kind": "normalized_weighted_ray_diagnostic",
+        "expected_normalized_angular_weight_sum": 1.0,
+        "expected_weighted_raw_residual": 0.36787944117144233
+      },
+      "allowed_uses": [
+        "s2_continuous_ray_reference"
+      ],
+      "forbidden_uses": [
+        "state",
+        "readiness",
+        "activation",
+        "persistence",
+        "finite_sample_graph"
+      ],
+      "expected": {
+        "invariants": [
+          "each omega is a finite unit vector tangent to q",
+          "uniform rho=1 with sigma=1/pi over r in [0, pi] has optical thickness 1 and raw residual exp(-1)",
+          "the four rays form a discrete aggregate diagnostic: sum(normalized_angular_weight * expected_raw_residual) equals exp(-1)",
+          "this analytic fixture only validates the S2 continuous ray reference and never constructs state, readiness, activation, persistence, or a finite Sample graph"
+        ]
+      }
+    }
+  ]
+}

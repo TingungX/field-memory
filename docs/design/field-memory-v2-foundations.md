@@ -2,10 +2,10 @@
 
 Status: draft
 Owner: field-memory
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 Scope: v2 的场本体、Event 表示、density、Sample、守恒运输、两相事件步与大场动力学
-Related code: 尚无；现有实现不构成本理论的约束
-Related docs: [v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[生产维度实验](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
+Related code: 计划中的独立 `crates/core/field-mem-v2/`；现有 v1 实现不构成本理论的约束
+Related docs: [v2 实现契约](../specs/field-memory-v2-implementation-contract.md)、[v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-authority-resolution-and-dimension.md)、[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)、[Sample 投影、覆盖责任与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)、[v2 验证计划](../specs/2026-08-10-field-memory-v2-validation-plan.md)、[生产维度实验](../specs/2026-08-12-v2-dimension-fidelity-experiment.md)、[v2 设计草案](../superpowers/specs/2026-07-04-field-memory-v2-design.md)、[v2 可行性规模验证](../reports/2026-08-09-v2-feasibility.md)
 
 ## 0. 文档地位
 
@@ -13,8 +13,9 @@ Related docs: [v2 权威、分辨率与维度 ADR](../decisions/2026-08-12-v2-au
 
 v2 是 field-memory 的当前理论权威；现有 Anchor/impact/RelaxationCycle 实现是
 冻结的独立 v1 路径，不参与补全本文，也不构成 v2 的兼容目标。本文中的
-开放项仍由 accepted implementation contract 阻断，不能因“v2 权威”而被
-实现者自行猜测。
+开放项不能因“v2 权威”而被实现者自行猜测。accepted implementation contract
+已经冻结第一版唯一数值算法、边界与验证命令；独立 v2 实现已解锁，但任何实现
+分叉仍须先以新 ADR 和新 algorithm id 修改契约。
 
 本文确认的结论优先于 2026-07-04 v2 草案中与之冲突的表述，尤其是：
 
@@ -55,17 +56,21 @@ v2 是 field-memory 的当前理论权威；现有 Anchor/impact/RelaxationCycle
 
 ### 1.2 Reference 维度与生产维度
 
-核心几何必须支持任意有限 \(D\)。\(S^2\) 仅作为三维环境向量上的严格
-reference backend，用来提供解析 coverage、volume、测地线和运输参考解；
-它不是默认生产语义空间。生产维度只能由真实 embedding 的独立保真实验
-决定，低维 reference 上的动力学通过不能替代该门禁。
+核心几何必须支持任意有限 \(D\)。`physics_reference_s2` 在 \(S^2\) 上承担
+连续几何和运输的 reference：它检验测地线、物理 density、纯吸收、守恒、方向矩
+与离散细化是否对同一个连续参考收敛。它不是默认生产语义空间；其连续收敛结论也
+不能直接迁移到高维 backend。
 
 当前生产语义表示已经由独立 formal 实验与 accepted ADR 冻结为
 \(D_{\rm semantic}=384\)，方向空间为 \(S^{383}\)。这个结论绑定已验证的
 BGE-M3 model digest、Build-only uncentered spherical PCA 和 projection bundle
-content hash；它不表示任意 384D 映射都合法。核心数学仍保持任意 \(D\)，
-`physics_reference_s2` 仍只用于严格 reference 测试。完整表示身份和重验边界见
-[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md)。
+content hash；它不表示任意 384D 映射都合法。`semantic384` 是同一因果链下、由
+density 派生的有限 Sample graph operational model：它必须满足版本身份、非负性、
+标量账本、可观测量不变量和事件步顺序，但固定 \(K\) 不被宣称为 \(S^{383}\) 上的
+局部连续网格，也不自动继承 \(S^2\) 的 continuum 命题。两个 backend 的 artifact
+不得互冒。完整表示身份与 backend 边界见
+[生产语义维度 384 ADR](../decisions/2026-08-12-v2-semantic-dimension-384.md) 和
+[Sample 投影、覆盖责任与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)。
 
 ### 1.3 理论对象与工程表示
 
@@ -151,7 +156,7 @@ Event 与 Sample 仍构成持久层和交互层；DensitySite 与 density 是二
 | Event | 持久 | 保存不可变 Content 与当前 Coordinate，作为当前场的有限拟合 |
 | DensitySite | 即时中间产物 | 从 EventCoordinate 几何中提取可区分的方向结构，用于重建 density |
 | Density | 即时导出场量 | 定义在完整方向空间上，用于生成完整的 Sample 场 |
-| Sample | 单次交互 | 固化 direction、coverage、volume 与 density，成为本次交互唯一可访问的场拟合 |
+| Sample | 单次交互 | 以 \(\phi\) 承担全域运输、以 \(\chi\) 固化 Physical density/volume/mass/Response；Carrier 只有前者，成为本次交互唯一可访问的场拟合 |
 
 完整链条是：
 
@@ -205,7 +210,8 @@ E_t'=\mathcal B(E_t,R_{t,K}^{\varepsilon}).
 - \(\mathcal G_K\)：在版本化内禀保真标准下，导出最多 \(K\) 个 Sample 可表达的最细尺度；
 - \(\mathcal C_{\ell_t^K}\)：从不同 EventCoordinate 的角几何生成 DensitySites；
 - \(\mathcal D_{\ell_t^K}\)：仅由 DensitySite 的相对角距离和派生尺度重建 density；
-- \(\mathcal P_K\)：只依据 density 的相对分布特征生成完整的 Sample 场，并把绝对 density 固化到各 Sample；
+- \(\mathcal P_K\)：只依据 density 的相对分布特征生成完整的 SampleField，把绝对
+  density 固化到 Physical Sample，并以零物理质量 Carrier 补足运输 coverage；
 - \(\mathcal I^{\varepsilon}\)：Sample 承接一个以 \(q\) 为作用点、预算为 \(I_0\) 的相位作用并产生 Response；\(\varepsilon=-1\) 表示自然坍缩，\(\varepsilon=+1\) 表示外界反坍缩；
 - \(\mathcal B\)：Response 反馈到 EventCoordinate，EventContent 保持不变。
 
@@ -217,60 +223,94 @@ E_t'=\mathcal B(E_t,R_{t,K}^{\varepsilon}).
 
 ### 3.2 Sample 的完整状态与采样功能
 
-Sample 不是零体积的方向点，而是对一个方向区域的有限表示。设 \(\phi_j(u)\) 为 Sample 集合共同导出的 coverage；不要求它具有显式硬边界，但必须满足完整覆盖：
+Sample 不是零体积的方向点，而是整个有限表示共同承担的两种责任。二者同属一个
+SampleField，不是两套场，也不能互相代替：
+
+- **运输 coverage \(\phi_j\)**：定义传播载荷当前由哪个 Sample 承接。它覆盖全部
+  方向空间，包含 Physical Sample 与 Carrier；
+- **物理责任 \(\chi_j\)**：只定义在 Physical Sample 上，定义已拟合的 physical
+  density、质量、Response 与回分配由谁承担。它不属于 Carrier。
+
+令 \(\mathcal T=\mathcal P\cup\mathcal C\) 分别为全体、Physical 与 Carrier
+Sample 集。\(\phi\) 是 \(\mathcal T\) 上共同导出的 soft partition of unity：
 
 \[
 \phi_j(u)\ge 0,
 \qquad
-\sum_j\phi_j(u)=1.
-\]
-
-v2 默认采用这种 soft partition of unity：同一方向可以由多个 Sample 按非负权重共同代表。硬 coverage 只是 \(\phi_j(u)\in\{0,1\}\) 的特例，不是理论默认。coverage 不是单个 Sample 独立拥有的半径，而是整个 Sample 集合共同导出的表示权重；其局部尺度必须来自 Sample geometry 与相对 density 的分辨率需求，不能由 Response 决定。
-
-单个 Sample 在本次交互中的完整状态写作：
-
-\[
-S_j=(s_j,V_j,\rho_j),
+\sum_{j\in\mathcal T}\phi_j(u)=1,
 \qquad
-s_j\in\mathcal D,
+V_j^{\mathrm T}=\int_{\mathcal D}\phi_j(u)\,d\Omega.
 \]
 
-其中 direction 是独立的位置坐标，coverage、volume 与 density 在 Sample 生成时由整个 Sample 场共同确定：
+硬 coverage 只是 \(\phi_j(u)\in\{0,1\}\) 的特例，不是理论默认。coverage
+不是单个 Sample 私有的物理密度半径；它是整个 Sample 集合的运输所有权，其几何
+只由 density 的相对分布特征和版本化投影规则导出，不能由 Response 误差反推。
+
+在 \(\rho_{t,K}(u)>0\) 的 physical 支撑上，Physical Sample 的责任满足：
 
 \[
-V_j=\int_{\mathcal D}\phi_j(u)\,d\Omega,
-\]
-
-\[
-\rho_j=
-\frac{1}{V_j}
-\int_{\mathcal D}\phi_j(u)\rho_{t,K}(u)\,d\Omega,
+\chi_j(u)\ge0,
 \qquad
-m_j=\rho_jV_j.
+\sum_{j\in\mathcal P}\chi_j(u)=1;
 \]
 
-由 partition of unity 与 \(\rho=M_{t,K}p\) 可得：
+在 \(\rho_{t,K}(u)=0\) 的方向，所有 \(\chi_j(u)=0\)。Physical Sample 的完整
+物理状态为
 
 \[
-\sum_jm_j
-=\sum_j\int_{\mathcal D}\phi_j(u)\rho_{t,K}(u)\,d\Omega
+S_j^{\mathrm P}=
+\bigl(s_j,\phi_j,V_j^{\mathrm T},\chi_j,V_j^{\mathrm P},m_j,\rho_j\bigr),
+\]
+
+其中
+
+\[
+V_j^{\mathrm P}=
+\int_{\rho_{t,K}>0}\chi_j(u)\,d\Omega,
+\qquad
+m_j=\int_{\mathcal D}\chi_j(u)\rho_{t,K}(u)\,d\Omega,
+\qquad
+\rho_j=\frac{m_j}{V_j^{\mathrm P}}.
+\]
+
+Carrier 的完整状态只有 \((s_j,\phi_j,V_j^{\mathrm T})\)：它可以临时承接传播
+载荷与方向矩，却严格满足 \(\chi_j\) 不存在、\(m_j=\rho_j=0\)。因此 Carrier
+不是 background density、真空质量或另一个 Response 单位；它不作自然源、不吸收、
+不产生 Response，也不进入 \(c/m\) 的回分配。其覆盖到 physical 支撑并不会给它
+分配任何物理质量。
+
+由 \(\chi\) 的 physical partition 与 \(\rho=M_{t,K}p\) 可得：
+
+\[
+\sum_{j\in\mathcal P}m_j
 =\int_{\mathcal D}\rho_{t,K}(u)\,d\Omega
 =M_{t,K}.
 \]
 
 该等式采用正常场的规范化 \(\rho=M_{t,K}p\)。若只为检验单位协变性而同时做 \(\rho\mapsto c\rho\)、\(\mu_i\mapsto c\mu_i\)，则总广延量变为 \(\mathcal M=cM_{t,K}\)；这种变换不是“同一 \(N_{\mathrm{site}}\) 的另一个合法正常场”，只用于证明表示与回分配不依赖单位选择。
 
-因此 \(m_j\) 既是 Sample 所代表的绝对结构量，也是把一个分辨率无关的场总预算分配给各 Sample 时可使用的广延权重。不能让每个 Sample 各自获得一份固定总预算，否则增加 \(K\) 会改变场的动力学。
+因此 \(m_j\) 是 Physical Sample 所代表的绝对结构量，也是自然相分配场总预算的
+广延权重。不能让每个 **Physical** Sample 各自获得一份固定总预算，否则增加 \(K\)
+会改变场的动力学。
 
-\(\rho_j\) 是 Sample 产生 Response 的绝对内禀性质，不是在交互时对原始 density 的查询。生成完成后，Sample 场必须独立承担整个交互：若两个 density 在给定分辨率下生成相同的 Sample 场，交互就必须把它们视为不可区分。想保留更多差异只能提高 Sample 对 density 的拟合精度，不能在交互中开旁路回看 density。
+\(\rho_j\) 是 Physical Sample 产生 Response 的绝对内禀性质，不是在交互时对原始
+density 的查询。生成完成后，SampleField 必须独立承担整个交互：若两个 density
+在给定分辨率下生成相同的 \((\phi,\chi,m,\rho,c)\)，交互就必须把它们视为不可
+区分。想保留更多差异只能提高 Sample 对 density 的拟合精度，不能在交互中开旁路
+回看 density。
 
-Sample 不持有 Content、Event 列表或历史。Sample 间的角距离、coverage、邻域和传递关系均由整个 Sample 集合的几何导出。
+Sample 不持有 Content、Event 列表或历史。Sample 间的角距离、transport coverage、
+邻域和传递关系均由整个 Sample 集合的几何导出；physical responsibility 则只由
+同一已拟合 density 的局部结构导出。
 
 ### 3.3 全方向空间仍然存在
 
 DensitySite 来自 \(X_t\)，但 \(X_t\) 不是场的边界。\(\rho_{t,K}\) 与后续交互必须定义在完整的 \(\mathcal D\) 上。无 Event 的方向可以具有低 density 或零 density，但不能因此成为不存在、不可采样或不可演化的禁区。
 
-精确 coverage 边界没有本体地位，因此不强制采用硬 cell；但 coverage 的完整性、volume 和 density 总量必须可计算。无 Event 的方向可以由较大的 Sample 区域表示，不能因此从 Sample 场中消失。
+精确 coverage 边界没有本体地位，因此不强制采用硬 cell；但 \(\phi\) 的完整性、
+transport volume 和 physical density 总量必须可计算。无 Event 的零-density 方向
+仍由 \(\phi\) 和 transport graph 经过，只是所有 \(\chi\) 为零、不会发生物理吸收
+或 Response。Carrier 负责这种承运覆盖，不能把它误写成该方向存在 \(\rho>0\)。
 
 ### 3.4 Anchor 的地位
 
@@ -370,35 +410,41 @@ Sample 的几何排布与分辨率分配只由 \(p\) 的变化特征决定；绝
 ### 5.3 Sample 生成
 
 给定 Sample 预算 \(K\)，\(\mathcal P_K\) 产生一个对相对 density
-\(p_{t,K}\) 的有限区域拟合。令 \(p_j=\rho_j/M_{t,K}\)，由 Sample 重建的
-相对 density 记作：
+\(p_{t,K}\) 的有限区域拟合。由 **Physical Sample** 重建的相对 density 记作：
 
 \[
-\widehat p_S(u)=\sum_j p_j\phi_j(u).
+\widehat p_S(u)
+=\frac1{M_{t,K}}
+\sum_{j\in\mathcal P}\rho_j\chi_j(u).
 \]
 
-Sample 的保真目标只能测量 \(p\) 与 \(\widehat p_S\) 之间尚未表达的 density 变化，不能读取或最小化下游 Response 误差。例如单元内 density 方差可以作为候选误差：
+Carrier 不参与 \(\widehat p_S\) 或表示误差；它只能保证承运 coverage 完整，不能用
+额外质量把空区“拟合”为非零 density。Sample 的保真目标只能测量 \(p\) 与
+\(\widehat p_S\) 之间尚未表达的 density 变化，不能读取或最小化下游 Response 误差。
+当前 implementation contract 以 total-variation residual 为唯一 density 投影
+停止量：
 
 \[
-\varepsilon_{S,\rho}^{2}
-=
-\sum_j
-\int_{\mathcal D}
-\phi_j(u)
-\big(p_{t,K}(u)-p_j\big)^2
-\,d\Omega.
+E_{\mathrm{TV}}(p,\widehat p_S)
+=\frac12\int_{\mathcal D}
+\left|p(u)-\widehat p_S(u)\right|\,d\Omega.
 \]
 
-该式是候选误差形式，不是已确认的唯一范数；已确认的是它必须只由 density 的相对分布特征导出。density 平坦的区域可以由更大的 Sample 表示，变化剧烈的区域需要更高分辨率。整体缩放 \(\rho\) 不得改变 Sample geometry。
+Residual projector 每次只能根据这个尚未表达的 density 残差选择或细化 Physical
+Sample；停止条件、候选与 deterministic tie-break 由 implementation contract 冻结。
+无论具体求积如何，已确认的是它必须只由 density 的相对分布特征导出。density
+平坦的区域可以由更大的 Physical Sample 表示，变化剧烈的区域需要更高分辨率。
+整体缩放 \(\rho\) 不得改变 Sample geometry。
 
 普通的 density 加权 CVT 可以提供 coverage、volume、邻接与几何优化的参考，但它最小化的是 density 加权角距离，而非 density 函数自身的变化误差，因此目前不是已确认的唯一采样律。
 
 ### 5.4 Density 与 Response 的当前边界
 
-Sample 的绝对内禀量已经在生成时固化为 \(\rho_j\)：
+Physical Sample 的绝对内禀量已经在生成时固化为 \(\rho_j\)，其责任形状为
+\(\chi_j\)：
 
 \[
-S_j=(s_j,V_j,\rho_j).
+S_j^{\mathrm P}=(s_j,\phi_j,V_j^{\mathrm T},\chi_j,V_j^{\mathrm P},m_j,\rho_j).
 \]
 
 单源交互核只能接收 Sample 场、当前作用点、相位取向与相位预算：
@@ -408,11 +454,17 @@ R^{\varepsilon}
 =\mathcal I^{\varepsilon}(S,q,I_0).
 \]
 
-自然相把多个 Sample 作用点的单源结果按各自预算叠加；外界相只有一个输入作用点。不得写成 \(\mathcal I(S,\rho,q)\)。density 的相对特征已经决定 Sample geometry，绝对 density 已经固化为 \(\rho_j\)；原始 density 在交互阶段退出作用域。
+自然相把多个正质量 Physical Sample 作用点的单源结果按各自预算叠加；外界相只有
+一个输入作用点。不得写成 \(\mathcal I(S,\rho,q)\)。density 的相对特征已经决定
+Sample geometry，绝对 density 已经固化为 \((\chi_j,\rho_j)\)；原始 density 在
+交互阶段退出作用域。
 
 影响在 Sample 间进行运输，而不是采用带相位、干涉或振荡的波动模型。运输过程可以记录为日志，但不是持久场状态。
 
-这里不再把“绝对 density 是否影响 Response”列为未决问题：寻找 Sample 的绝对内禀量，本来就是为了让相同环境下的不同 Sample 产生不同 Response。当前采用的最小本构公理是：\(\rho_j\) 决定 Sample 的局部吸收系数，Sample 把传播载荷中被吸收的部分转换为 Response。
+这里不再把“绝对 density 是否影响 Response”列为未决问题：寻找 Physical Sample 的
+绝对内禀量，本来就是为了让相同环境下的不同 Sample 产生不同 Response。当前采用的
+最小本构公理是：\(\rho_j\) 决定 Physical Sample 的局部吸收系数，\(\chi_j\) 决定
+其在位置上的责任，Carrier 则只把传播载荷承运到可吸收的位置。
 
 准确说，density 不是完整的“转换率”；它决定单位路径上的转换系数：
 
@@ -420,12 +472,15 @@ R^{\varepsilon}
 \kappa_j=\sigma\rho_j.
 \]
 
-其中 \(\sigma\) 是对所有 Sample 相同的场版本常量，而不是新的 Sample
+其中 \(\sigma\) 是对所有 Physical Sample 相同的场版本常量，而不是新的 Sample
 属性或运行期调节量。当前接受的归一化是：在该版本的初始化参考均匀场中，
 从作用点到对点的平均光学厚度为 1。implementation contract 必须给出参考
 场、求积与数值值；正常事件步不得重估或调节 \(\sigma\)。
 
-因此两种 density 信息承担不同职责：相对分布 \(p\) 的变化特征决定 Sample geometry，固化在 Sample 中的绝对 \(\rho_j\) 决定局部吸收强度。交互仍然只读取 Sample，不会回看原始 density。
+因此两种 density 信息承担不同职责：相对分布 \(p\) 的变化特征决定 Sample
+geometry，固化在 Physical Sample 中的 \((\chi_j,\rho_j)\) 决定局部吸收强度。
+\(\phi\) 只决定载荷的运输所有权，不是 physical density 的平均器。交互仍然只
+读取 SampleField，不会回看原始 density。
 
 ---
 
@@ -474,13 +529,18 @@ R^{\varepsilon}
 {\sqrt{1-(q\cdot u)^2}}.
 \]
 
-交互时可访问的局部吸收系数只由 Sample 场重建：
+交互时可访问的局部吸收系数只由 Physical Sample 的责任重建：
 
 \[
 \kappa_S(u)
-=\sum_j\phi_j(u)\kappa_j
-=\sigma\sum_j\phi_j(u)\rho_j.
+=\sum_{j\in\mathcal P}\chi_j(u)\kappa_j
+=\sigma\sum_{j\in\mathcal P}\chi_j(u)\rho_j.
 \]
+
+这里 \(\phi\) 与 \(\chi\) 的分离是必要的：前者使零-density 空区仍可由 Sample
+graph 承运，后者才决定物理吸收和 Response。Carrier 可以有 \(\phi_j>0\)，但没有
+\(\chi_j\)、\(\kappa_j\) 或 Response row；不能因为其 coverage 覆盖某处，就给该处
+虚构 absorption。
 
 令 \(I(r,\omega)\) 表示单位发射方向测度上的剩余传播载荷，初始总载荷为 \(I_0\)。每条射线满足：
 
@@ -511,12 +571,12 @@ d\Omega
 
 因此点源在 \(r=0\) 与对点 \(r=\pi\) 附近的单位面积强度可以发散，但沿发射方向保存的总载荷始终有限。本文使用单位球面和以弧度计的无量纲路径；\(\kappa_S\) 因而表示每弧度吸收系数。
 
-Sample \(j\) 在完整传播中吸收的标量载荷定义为：
+Physical Sample \(j\) 在完整传播中吸收的标量载荷定义为：
 
 \[
 a_j
 =\int_{\mathbb S_q}\int_0^\pi
-\phi_j(\gamma_{q,\omega}(r))
+\chi_j(\gamma_{q,\omega}(r))
 \kappa_j
 I(r,\omega)
 \,dr\,d\nu_q(\omega).
@@ -529,13 +589,17 @@ I(r,\omega)
 =\int_{\mathbb S_q}\int_0^\pi
 \operatorname{PT}_{\gamma_{q,\omega}(r)\rightarrow s_j}
 \big(\dot\gamma_{q,\omega}(r)\big)
-\phi_j(\gamma_{q,\omega}(r))
+\chi_j(\gamma_{q,\omega}(r))
 \kappa_j
 I(r,\omega)
 \,dr\,d\nu_q(\omega).
 \]
 
-这里的平行运输只用于把 Sample coverage 内不同位置的切向量汇总到 \(T_{s_j}\mathcal D\)。当前采用唯一最短测地线上的 Levi-Civita 平行运输，并只在 \(d(\gamma,s_j)<\pi\) 时定义；cut locus 是连续积分中的零测集，数值积分不能把它作为带非零权重的节点。soft coverage 应具有局部支撑，不能跨对点任意选择非唯一测地线。
+这里的平行运输只用于把 Physical Sample 责任区内不同位置的切向量汇总到
+\(T_{s_j}\mathcal D\)。当前采用唯一最短测地线上的 Levi-Civita 平行运输，并只在
+\(d(\gamma,s_j)<\pi\) 时定义；cut locus 是连续积分中的零测集，数值积分不能把它
+作为带非零权重的节点。\(\chi\) 具有局部支撑，不能跨对点任意选择非唯一测地线；
+Carrier 没有方向矩积累。
 
 传播到对点后仍未被吸收的总载荷为：
 
@@ -544,18 +608,18 @@ I_{\mathrm{res}}
 =\int_{\mathbb S_q}I(\pi,\omega)\,d\nu_q(\omega).
 \]
 
-由 \(\sum_j\phi_j\kappa_j=\kappa_S\) 可得严格账本：
+由 \(\sum_{j\in\mathcal P}\chi_j\kappa_j=\kappa_S\) 可得严格账本：
 
 \[
 I_0
-=I_{\mathrm{res}}+\sum_j a_j.
+=I_{\mathrm{res}}+\sum_{j\in\mathcal P} a_j.
 \]
 
 该式是纯吸收运输的**原始账本**。当前 v2 不把 \(I_{\mathrm{res}}\) 留成跨相位状态，也不在对点制造一个独立的超级 Response；而是把原始吸收已经给出的空间比例视为本次载荷应落向何处的充分信息。令
 
 \[
 A_{\mathrm{raw}}(q)
-=\sum_j a_j
+=\sum_{j\in\mathcal P} a_j
 =I_0-I_{\mathrm{res}}.
 \]
 
@@ -572,7 +636,7 @@ A_{\mathrm{raw}}(q)
 于是：
 
 \[
-\sum_j\widetilde a_j=I_0,
+\sum_{j\in\mathcal P}\widetilde a_j=I_0,
 \qquad
 \|\widetilde{\mathbf M}_j\|
 \le\widetilde a_j.
@@ -580,21 +644,33 @@ A_{\mathrm{raw}}(q)
 
 该闭合把残余按已经形成的 Sample Response 比例重新分配到所有吸收位置，保留相对空间分布与方向矩，不再留下对点状态。它是 v2 选择的终点公理，不是局部吸收方程推出的结论。下文无特别说明时，\(a_j,\mathbf M_j\) 均指闭合后的量。
 
-若 \(A_{\mathrm{raw}}(q)=0\)，比例闭合没有定义；这只允许出现在真空运输测试或尚未完成初始化的场中。正常动力学要求初始化已经使所有合法作用点具有非零有效吸收，不能用任意方向或伪造 Response 掩盖零吸收。
+若 \(A_{\mathrm{raw}}(q)=0\)，比例闭合没有定义；这只允许出现在真空运输测试或
+尚未完成初始化的场中。正常动力学要求实际 source 具有非零 raw 吸收，不能用任意
+方向或伪造 Response 掩盖零吸收。\(A_{\mathrm{raw}}>0\) 也不是充分的数值质量
+证明：由于比例闭合会放大极小差异，闭合前还必须通过固定 SampleField 上的版本化
+运输细化比较；比较 normalized raw Response 的标量分布和方向矩，而不是引入任意的
+绝对 `MIN_RAW_ABSORPTION` 门槛。
 
-上述定义是载荷在 \((r,\omega)\) 射线坐标中的连续参考模型：Sample 提供吸收系数并接收沉积，但载荷尚未被表示成 Sample 间的成对通量。它不能直接冒充“所有运输都发生在 Sample 间”的离散实现；后者必须把同一连续运输投影为 Sample 状态与反对称数值通量，并证明随 Sample 细化收敛到本节定义。
+上述定义是载荷在 \((r,\omega)\) 射线坐标中的连续参考模型：Physical Sample
+提供吸收系数并接收沉积，Carrier 只承运；载荷尚未被表示成 Sample 间的成对通量。
+它不能直接冒充“所有运输都发生在 Sample 间”的离散实现；后者必须把同一连续运输
+投影为 Sample state 与反对称数值通量，并在 `physics_reference_s2` 中验证细化收敛到
+本节定义。
 
 ### 6.2 传播载荷、Response 与有限体积守恒
 
 为了保持“交互只发生在 Sample 层”的约束，实际离散必须把传播载荷投影到 Sample。令
 
 \[
-U_j=V_jI_j,
+U_j=V_j^{\mathrm T}I_j,
 \qquad
-Q_j=V_jR_j
+Q_l=\text{Physical Sample \(l\) 已累计的广延 Response}
 \]
 
-分别表示 Sample \(j\) 当前承接的广延传播载荷和已经累计的广延 Response。soft coverage 下，“当前由哪个 Sample 承接载荷”和“由哪个 Sample 的 density 吸收载荷”不是同一个责任，因此一般守恒形式需要非负的吸收转移量 \(\mathcal A_{j\rightarrow l}\)：
+分别表示 Sample \(j\) 当前承接的广延传播载荷和 Physical Sample \(l\) 已经累计的
+广延 Response。soft coverage 下，“当前由哪个 Sample 以 \(\phi\) 承接载荷”和
+“由哪个 Physical Sample 以 \(\chi\rho\) 吸收载荷”不是同一个责任，因此一般守恒
+形式需要非负的吸收转移量 \(\mathcal A_{j\rightarrow l}\)：
 
 \[
 \frac{dU_j}{d\tau}
@@ -618,18 +694,25 @@ Q_j=V_jR_j
 \[
 \mathcal A_{j\rightarrow l}
 =\int_{\mathcal D}
-\phi_j(u)\phi_l(u)\kappa_lJ(u,\tau)
+\phi_j(u)\chi_l(u)\kappa_lJ(u,\tau)
 \,d\Omega.
 \]
 
-其中 \(\phi_j\) 是载荷所有权，\(\phi_l\kappa_l\) 是吸收责任。对 \(l\) 求和得到 Sample \(j\) 应扣除的总载荷；对 \(j\) 求和得到吸收 Sample \(l\) 应累计的 Response。于是内部通量和吸收转移分别成对抵消：
+其中 \(\phi_j\) 是载荷所有权，\(\chi_l\kappa_l\) 是 Physical Sample 的吸收责任。
+对 \(l\) 求和得到 Sample \(j\) 应扣除的总载荷；对 \(j\) 求和得到吸收 Sample \(l\)
+应累计的 Response。于是内部通量和吸收转移分别成对抵消：
 
 \[
 \frac{d}{d\tau}
-\sum_j(U_j+Q_j)=0.
+\left(
+\sum_{j\in\mathcal T}U_j+\sum_{l\in\mathcal P}Q_l
+\right)=0.
 \]
 
-硬 coverage 下，\(\phi_j\phi_l=0\)（\(j\ne l\)），吸收 coupling 退化为对角形式 \(\mathcal A_{j\rightarrow j}\)；先前“Sample 自己扣除多少，就给自己的 Response 增加多少”的写法只在这种硬 partition 或经过证明的 mass-lumped 近似下成立，不能作为一般 soft coverage 定律。
+当 \(\phi\) 与 \(\chi\) 都是相同的硬 partition 时，吸收 coupling 才退化为对角形式
+\(\mathcal A_{j\rightarrow j}\)；先前“Sample 自己扣除多少，就给自己的 Response
+增加多少”的写法只在这种特例或经过证明的 mass-lumped 近似下成立，不能作为一般
+soft coverage 定律。
 
 soft partition 还可从弱形式导出一个成对通量候选。定义源点 \(q\) 下的有效有向界面系数：
 
@@ -655,7 +738,20 @@ B_{jk}=-B_{kj}.
 \mathcal F_{kj}=-\mathcal F_{jk}.
 \]
 
-它使用 soft coverage 的梯度导出有效界面，正向系数读取上游 Sample，且同一界面只计算一次。该式目前是满足反对称性与顺传播方向的离散候选，不是已证明唯一或已经收敛的方案；仍须验证一致性、稳定性、非负性以及对测地射线连续模型的收敛。
+它使用 soft coverage 的梯度导出有效界面，正向系数读取上游 Sample，且同一界面只计算一次。该式是理论阶段记录的弱形式候选，不是 v2c 第一版的实现算法。
+当前 accepted implementation contract 冻结的是另一条明确有限的
+`endpoint_radial_finite_v1` graph rule；它只对 semantic384 声明 operational
+语义，不能反向冒充这里的连续弱形式或 S2 收敛定理。实现者必须遵循 contract，
+不得在两式间自行选择。若未来采用本弱形式，必须新立 ADR、变更 algorithm id
+并重新验证一致性、稳定性、非负性和连续 reference 收敛。
+
+离散 state 还必须为每个承运 Sample 保存切向方向矩 \(W_j\)，并保持
+\(\|W_j\|\le U_j\)。某条 edge 上的正 scalar flux 从上游取走的 \(W\) 分量必须
+按同一比例取走，到达下游时沿该 edge 的唯一短测地线平行运输；吸收时再按同一
+\(\phi\)-to-\(\chi\) 责任分解把该方向矩交给 Physical Sample。换言之，方向矩由
+**实际经过的 edge** 携带，不能每到一个 Sample 都以“作用点到该中心”的端点径向
+向量重算。edge/coupling 的非零权重若触及 cut locus，必须显式失败或在进入运输前
+由版本化图规则排除，不能任选方向。
 
 点源的守恒初值投影为：
 
@@ -670,13 +766,13 @@ U_j(0)=\phi_j(q)I_0,
 这里采用“纯吸收”公理：传播载荷的全部扣减都以同一数值计入某个 Sample Response，没有来源不明的损耗项。离散实现必须同时保留两份可审计账本：比例闭合前满足
 
 \[
-I_0=I_{\mathrm{res}}+\sum_jQ_j^{\mathrm{raw}},
+I_0=I_{\mathrm{res}}+\sum_{j\in\mathcal P}Q_j^{\mathrm{raw}},
 \]
 
 比例闭合后满足
 
 \[
-I_0=\sum_jQ_j.
+I_0=\sum_{j\in\mathcal P}Q_j.
 \]
 
 闭合只能按原始 Sample Response 的全局比例缩放，不能把残余直接写入 Event、原始 density 或一个持久对点对象。真空情形只验证原始账本，不进入正常事件步。
@@ -689,21 +785,23 @@ I_0=\sum_jQ_j.
 \kappa_j=\sigma\rho_j.
 \]
 
-在 soft overlap 的位置 \(u\)，Sample \(j\) 对总吸收率的贡献不是独立执行一次 \(\kappa_jI\)，而是：
+在 soft overlap 的位置 \(u\)，Physical Sample \(j\) 对总吸收率的贡献不是独立执行
+一次 \(\kappa_jI\)，而是：
 
 \[
 \mathcal A_j(u,I)
-=\phi_j(u)\kappa_jI.
+=\chi_j(u)\kappa_jI.
 \]
 
-只有硬 coverage 或经过证明的 mass-lumped 离散，才退化成 \(\mathcal A(\rho_j,I_j)=\kappa_jI_j\)。
+只有 \(\phi\) 与 \(\chi\) 相同的硬 coverage 或经过证明的 mass-lumped 离散，才退化成
+\(\mathcal A(\rho_j,I_j)=\kappa_jI_j\)。
 
 在沿射线路径长度为 \(\Delta r\) 的一个离散小段上，必须先用同一个总吸收系数计算唯一一次载荷扣减。令
 
 \[
-\alpha_j(u)=\phi_j(u)\kappa_j,
+\alpha_j(u)=\chi_j(u)\kappa_j,
 \qquad
-\kappa_S(u)=\sum_j\alpha_j(u),
+\kappa_S(u)=\sum_{j\in\mathcal P}\alpha_j(u),
 \]
 
 则常系数小段的精确更新为：
@@ -727,7 +825,8 @@ I_{\mathrm{out}}
 \end{cases}
 \]
 
-于是 \(\sum_j\Delta a_j=\Delta A\)。衰减与 Sample Response 不能分别进行两次数值积分，否则即使各自看似合理，也会产生守恒漂移。
+于是 \(\sum_{j\in\mathcal P}\Delta a_j=\Delta A\)。衰减与 Sample Response 不能
+分别进行两次数值积分，否则即使各自看似合理，也会产生守恒漂移。
 
 其中“线性于当前载荷”“沿路径指数累计”和“线性于 density”需要分开说明，不能混成一个结论。
 
@@ -771,12 +870,14 @@ T_\rho(\lambda)
 \sigma\ge 0.
 \]
 
-当前工作模型选择接受这条粗粒化闭合公理。它与“Sample 只保存区域平均 density”相匹配，但仍是 v2 选择的本构关系，不是 density 的几何定义自行证明出来的事实。
+当前工作模型选择接受这条粗粒化闭合公理。它与“Physical Sample 只保存由
+\(\chi\) 定义的区域平均 density”相匹配，但仍是 v2 选择的本构关系，不是 density
+的几何定义自行证明出来的事实。
 
-令只由 Sample 场重建的绝对 density 为
+令只由 Physical Sample 的责任重建的绝对 density 为
 
 \[
-\widehat\rho_S(u)=\sum_j\rho_j\phi_j(u),
+\widehat\rho_S(u)=\sum_{j\in\mathcal P}\rho_j\chi_j(u),
 \]
 
 则一条传播路径 \(\gamma\) 的累计厚度、残余载荷和总转换量为：
@@ -794,15 +895,22 @@ R_\gamma
 =I_{\mathrm{in}}\left(1-e^{-x_\gamma}\right).
 \]
 
-因此应把先前的表述校正为：**绝对 Sample density 决定单位路径转换系数；实际瞬时转换率是 \(\sigma\rho_jI_j\)，累计 Response 则由整段路径的 density 积分决定。**
+因此应把先前的表述校正为：**Physical Sample 的绝对 density 与责任 \(\chi\)
+共同决定单位路径转换系数；实际瞬时转换率是 \(\sigma\chi_j\rho_j I\)，累计
+Response 则由整段路径的 physical-density 积分决定。**
 
-这里的路径暴露 \(d\lambda\) 与 Sample 的角 volume \(V_j\) 不是同一个量。\(V_j\) 负责有限体积账本和界面通量；一束传播载荷在 Sample coverage 内实际走过的路径或停留时间，才决定它承受多少吸收。不能把“访问一个 Sample”默认为一次固定吸收，也不能直接用 Sample 数量代替路径长度。
+这里的路径暴露 \(d\lambda\) 与 Sample 的 transport volume \(V_j^{\mathrm T}\) 不是
+同一个量。\(V_j^{\mathrm T}\) 负责有限体积账本和界面通量；一束传播载荷在
+coverage 内实际走过的路径或停留时间，以及其在 \(\chi\) 上的 physical responsibility，
+才决定它承受多少吸收。不能把“访问一个 Sample”默认为一次固定吸收，也不能直接用
+Sample 数量代替路径长度。
 
 ### 6.4 Sample 细分不变性的准确含义
 
 有限体积结构保证的是“每个离散分辨率内部的账本严格守恒”，不是不同 Sample 数一定得到相同的总 Response 或局部 Response 分布。要使守恒与细分收敛成立，离散实现至少必须满足：
 
-- coverage 构成 partition of unity，并由同一套 coverage 导出 \(V_j\)、\(\rho_j\) 和有效界面；
+- transport coverage \(\phi\) 构成 partition of unity，并由它导出 transport volume
+  与有效界面；physical responsibility \(\chi\) 单独导出 \(m_j\)、\(\rho_j\) 与吸收；
 - 一次界面转移只计算一个数值通量，并以相反符号同时记入相邻两个 Sample；
 - 吸收的载荷扣减与 Response 增量使用同一个离散量；
 - 局部更新保持非负，不能从一个 Sample 扣除多于它实际持有的载荷；
@@ -811,13 +919,19 @@ R_\gamma
 最后一条与指数透过率的半群性质共同保证：把一个均匀 Sample 沿传播路径拆成两个，不改变总透过率。对非均匀单元，一般存在：
 
 \[
-V_j\rho_jI_j
+V_j^{\mathrm T}\rho_jI_j
 \ne
 \int_{\mathcal D}
-\phi_j(u)\rho(u)I(u)\,d\Omega,
+\chi_j(u)\rho(u)I(u)\,d\Omega,
 \]
 
-因为区域平均会丢失 density 与传播载荷在单元内的相关性。因此当前理论只能要求：每个 \(K\) 下 \(\sum_jV_j(I_j+R_j)\) 严格守恒；随着最大 Sample 直径趋近于零，保守、一致且稳定的离散收敛到同一个连续解。不同有限 \(K\) 的总 Response 也可能在收敛前不同。只有父单元内 density 或载荷近似常量，或 Sample 额外保留混合矩时，才能宣称有限分辨率间的精确 Response 不变。
+因为区域平均会丢失 density 与传播载荷在单元内的相关性。因此当前理论只能要求：
+每个 \(K\) 下 \(\sum_{j\in\mathcal T}U_j+\sum_{l\in\mathcal P}Q_l\) 严格守恒；在
+`physics_reference_s2` 中，随着最大 Sample 直径趋近于零，保守、一致且稳定的
+离散应收敛到同一个连续解。不同有限 \(K\) 的总 Response 也可能在收敛前不同。
+固定 \(K\) 的 `semantic384` 只承担有限 graph 的 operational invariant，不借此
+宣称 \(S^{383}\) continuum convergence。只有父单元内 density 或载荷近似常量，或
+Sample 额外保留混合矩时，才能宣称有限分辨率间的精确 Response 不变。
 
 由于 density 的 Sample 平均使用球面面积测度 \(d\Omega\)，而传播光学厚度使用射线路径测度 \(dr\,d\nu_q\)，仅保证球面 \(L^1(d\Omega)\) density 误差收敛并不足以保证运输收敛。Sample 的 density-only 保真标准还必须控制所有测地路径积分，例如：
 
@@ -835,7 +949,13 @@ p(\gamma_{q,\omega}(r))
 \right|.
 \]
 
-该候选误差只读取相对 density，不读取某次 Response 或某个实际作用点，因此不违反 Sample 只能由场的内禀 density 特征决定的原则。更强但更简单的充分条件是控制 \(\|p-\widehat p_S\|_\infty\)，此时任意完整测地路径的积分误差至多为 \(\pi\|p-\widehat p_S\|_\infty\)。最终采用哪一种 density-only 范数仍待比较。
+该候选误差只读取相对 density，不读取某次 Response 或某个实际作用点，因此不违反
+Sample 只能由场的内禀 density 特征决定的原则。更强但更简单的充分条件是控制
+\(\|p-\widehat p_S\|_\infty\)，此时任意完整测地路径的积分误差至多为
+\(\pi\|p-\widehat p_S\|_\infty\)。当前 implementation contract 用
+\(E_{\mathrm{TV}}\) 作为 density-only projection gate，并另以
+`physics_reference_s2` 的逐 ray/运输细化验证补足其不保证的路径误差；二者的
+算法与结论边界以 accepted contract 为准。
 
 ### 6.5 Response 的最小内容
 
@@ -843,7 +963,7 @@ p(\gamma_{q,\omega}(r))
 
 尤其在作用点的球面对点，多条路径可以从各方向对称汇聚：累计吸收量可以很大，一阶入射方向矩却恰好为零。因此“对点的大残余代表对场的平均影响”只有在区分标量总量与方向矩后才是准确的；不能把大标量自动解释成一个任意方向上的大位移。
 
-因此一次单源运输先产生无相位的 Sample Response：
+因此一次单源运输只在 Physical Sample 上产生无相位 Response：
 
 \[
 \mathscr R_j=(a_j,\mathbf M_j),
@@ -887,7 +1007,7 @@ density 规范下的结构权重；在规范化的 \(\rho=M_{t,K}p\) 中每个�
 \int_{\mathcal D}\mathsf{k}_{\ell_t^K}(u,z_i)\,d\Omega=1,
 \]
 
-并用同一个 kernel 定义 density 与 Sample-to-geometry coupling：
+并用同一个 kernel 定义 density 与 Physical Sample-to-geometry coupling：
 
 \[
 \rho_{t,K}(u)
@@ -897,7 +1017,8 @@ density 规范下的结构权重；在规范化的 \(\rho=M_{t,K}p\) 中每个�
 \[
 c_{ji}
 =\mu_i\int_{\mathcal D}
-\phi_j(u)\mathsf{k}_{\ell_t^K}(u,z_i)\,d\Omega.
+\chi_j(u)\mathsf{k}_{\ell_t^K}(u,z_i)\,d\Omega,
+\qquad j\in\mathcal P.
 \]
 
 \(c_{ji}\) 表示几何单位 \(i\) 有多少结构责任由 Sample \(j\) 承担。它是
@@ -907,20 +1028,24 @@ c_{ji}
 \[
 c_{ji}\ge0,
 \qquad
-\sum_jc_{ji}=\mu_i,
+\sum_{j\in\mathcal P}c_{ji}=\mu_i,
 \qquad
-\sum_i c_{ji}=m_j=\rho_jV_j.
+\sum_i c_{ji}=m_j.
 \]
 
 并且
 
 \[
 \sum_i\mu_i
-=\sum_jm_j
+=\sum_{j\in\mathcal P}m_j
 =\int_{\mathcal D}\rho(u)\,d\Omega.
 \]
 
-第一项保证 soft responsibility 非负；第二项保证每个可区分几何单位的完整结构权重只被表示一次；第三项保证 Sample 所代表的结构总量与其 density mass 一致。density 若仅为验证尺度不变性而整体缩放，\(\mu_i,c_{ji},m_j\) 一起缩放，不会破坏这组恒等式。由此，Sample 的带相位方向矩按同一 coupling 的伴随回分配：
+第一项保证 physical responsibility 非负；第二项保证每个可区分几何单位的完整
+结构权重只被表示一次；第三项保证 Physical Sample 所代表的结构总量与其 density
+mass 一致。Carrier 没有 \(c\) row，因而不进入这些边缘恒等式。density 若仅为验证
+尺度不变性而整体缩放，\(\mu_i,c_{ji},m_j\) 一起缩放，不会破坏这组恒等式。由此，
+Physical Sample 的带相位方向矩按同一 coupling 的伴随回分配：
 
 \[
 \Delta\mathbf P_{i\leftarrow j}
@@ -949,7 +1074,9 @@ a_i=\sum_j\Delta a_{i\leftarrow j}.
 =\varepsilon\mathbf M_j.
 \]
 
-零质量 Sample 必须满足 \(c_{ji}=a_j=\mathbf M_j=0\)，不进入含 \(1/m_j\) 的回分配；不能用任意除数掩盖真空行。
+Carrier 必须满足 \(c_{ji}=a_j=\mathbf M_j=0\)，不进入含 \(1/m_j\) 的回分配；
+任何零质量 Physical candidate 也不得以任意除数掩盖真空行，而必须按 contract 的
+投影规则删除或令该 SampleField 不可用。
 
 因此守恒的是反馈载荷，而不是不同切空间中坐标位移的普通向量和。若 Sample 同等代表 \(n\) 个几何单位，上式才退化成每个单位获得 \(\mathbf M_j/n\)。一个几何单位中无论挂有多少 EventContent，都不能再次按内容数除小；这些 EventCoordinate 必须接受相同的几何变换。
 
@@ -1010,6 +1137,9 @@ L_{\mathrm{event}}
 - 全局比例闭合后的 Response 空间衰减是否足以产生所需的局部作用范围。
 
 这些问题必须继续在 Sample 层内回答；不能为了补足方向信息而绕过 Sample 读取 Event 或原始 density。
+它们的数值答案必须同时注明 backend：`physics_reference_s2` 的目标是连续参考
+收敛；`semantic384` 的目标是有限 operational graph 的可审计不变量，不能把前者的
+continuum 语言移植为后者未作出的承诺。
 
 ---
 
@@ -1031,7 +1161,7 @@ I_0^{\mathrm C}=I_0^{\mathrm A}=1.
 
 \[
 \mathcal M_{t,K}^{\mathrm C}
-=\sum_hm_{h,K}^{\mathrm C}
+=\sum_{h\in\mathcal P}m_{h,K}^{\mathrm C}
 =\int_{\mathcal D}\rho_{t,K}^{\mathrm C}(u)\,d\Omega.
 \]
 
@@ -1043,10 +1173,13 @@ w_{h,K}^{\mathrm{src},\mathrm C}
 \qquad
 I_{0,h,K}^{\mathrm C}=w_{h,K}^{\mathrm{src},\mathrm C},
 \qquad
-\sum_hw_{h,K}^{\mathrm{src},\mathrm C}=1.
+\sum_{h\in\mathcal P}w_{h,K}^{\mathrm{src},\mathrm C}=1.
 \]
 
-“每个 Sample 触发一次”指这组分辨率无关的求积贡献，不是发生 \(K\) 次状态更新，也不是每个 Sample 各发一份单位载荷。每个源 \(h\) 必须针对自己的 \(I_{0,h}^{\mathrm C}\) 分别完成第 6.1 节的原始账本与比例闭合，再汇总所有源的 Response；不能让一个低吸收源的残余由另一个源代为吸收。
+“每个正质量 Physical Sample 触发一次”指这组分辨率无关的求积贡献，不是发生
+\(K\) 次状态更新，也不是每个 Sample 各发一份单位载荷。Carrier 不作自然源。每个源
+\(h\) 必须针对自己的 \(I_{0,h}^{\mathrm C}\) 分别完成第 6.1 节的原始账本与比例闭合，
+再汇总所有源的 Response；不能让一个低吸收源的残余由另一个源代为吸收。
 
 自然相显式采用**无自力公理**：源 Sample \(h\) 分配给自身 Sample Response 的标量 \(a_{h\leftarrow h}\) 仍参与账本，但对应方向矩规定为零：
 
@@ -1229,7 +1362,11 @@ implementation contract 必须证明 \(\mathcal G_K\) 选出的每个场版本�
 
 ### 9.3 旋转等变性
 
-若所有 Coordinate 和扰动一起做同一个正交旋转，DensitySite、density、Sample 分布和场响应也应只做同样旋转。
+若所有 Coordinate 和扰动连同其稳定标签一起做同一个正交旋转，非退化情形下
+DensitySite、density、Sample 分布和场响应也应只做同样旋转。若有限代表选择
+落在 EPS tie 或连续对称退化中，则不存在唯一中心；此时依 accepted gauge 对齐
+代表，并要求重建 density/coverage、coupling、Response 与 EventCoordinate 变化等
+observable 旋转等变，不能把 ambient coordinate 排序伪装成物理选择。
 
 ### 9.4 分辨率单调性
 
@@ -1255,7 +1392,11 @@ Sample 生成完成后，它是本次交互唯一可访问的场拟合。原始 
 
 ### 9.9 软覆盖一致性
 
-Sample coverage 默认是非负 partition of unity，硬 cell 只是特例。volume、固化 density、有效界面、前向聚合与 Response 回分配必须来自一致的表示权重，不能分别使用互不相干的 membership 规则。
+transport coverage \(\phi\) 默认是非负 partition of unity，硬 cell 只是特例；它定义
+transport volume、有效界面和载荷所有权。physical responsibility \(\chi\) 定义
+Physical Sample 的 density、质量、前向聚合与 Response 回分配。二者必须由同一个
+SampleField 和已拟合 density 一致导出，但不能偷换成同一 membership：Carrier 的
+\(\phi\) 可以为正而 \(\chi\) 严格不存在。
 
 ### 9.10 反馈重复不变性
 
@@ -1271,8 +1412,9 @@ Sample Response 按可区分几何单位而非 EventContent 行数守恒分配�
 
 ### 9.13 等预算与 K 版本边界
 
-自然相和外界相的总预算各为 1。自然相各 Sample 源只能获得
-\(m_j/\sum_km_k\) 的份额；固定场版本内的 Sample 数量不得改变相位总预算。
+自然相和外界相的总预算各为 1。自然相各正质量 Physical Sample 源只能获得
+\(m_j/\sum_{k\in\mathcal P}m_k\) 的份额；Carrier 不参与这一求和，固定场版本内的
+Sample 数量不得改变相位总预算。
 修改 \(K\) 必须走显式 resolution migration，不能作为事件步内调参。
 
 ### 9.14 大场适用域
@@ -1281,16 +1423,23 @@ Sample Response 按可区分几何单位而非 EventContent 行数守恒分配�
 
 ---
 
-## 10. 后续理论必须回答、本文暂不回答的问题
+## 10. implementation contract 已闭合的实现选择
+
+以下项目不授权实施者自行选择；唯一算法、常量、边界和失败方式必须由
+[v2 实现契约](../specs/field-memory-v2-implementation-contract.md) 冻结。该契约
+accepted contract 已逐项冻结下列选择，并构成独立 v2 实现许可。它们仍须按
+Phase 0–4 用实验验证；它们是实现公理，不是已经由本文证明的自然定律。
 
 1. \(\mathcal G_K\) 的唯一内禀误差准则、不可行边界、单调算法与 tie-break。
 2. \(\mathcal C_{\ell_t^K}\) 的具体角聚类约束、代表 direction 和非唯一解处理。
 3. 已接受的紧支撑 kernel family 的具体 profile、归一化与跨派生尺度一致性。
-4. \(\mathcal P_K\) 如何依据相对 density 的变化误差生成有限 Sample，同时给出完整 coverage、volume 与固化 density。
+4. \(\mathcal P_K\) 如何依据相对 density 的变化误差生成有限 Sample，同时给出完整
+   transport coverage \(\phi\)、transport/physical volume、physical responsibility
+   \(\chi\) 与固化 density；Carrier 必须保持零物理质量。
 5. density 变化误差应采用单元方差、最坏测地路径积分误差还是更强的统一范数，以及给定 \(K\) 的理论保真上界。
 6. soft coverage 上唯一的 upwind finite-volume 网格、求积与通量重建，以及全局比例闭合后的 Response 是否保持足够空间衰减。
 7. 参考均匀场、\(\sigma\) 的离散标定值，以及同一 kernel 导出的 coupling 在全部合法 geometry 上的稳定构造。
 8. 近外界反坍缩与远自然坍缩的作用范围，以及长期非平凡动态平衡是否存在。
 9. 初始化 readiness probe 的充分门槛，以及 Building 到 Active 的失败与恢复协议。
 
-这些问题不得修改已经确立的因果边界：**场是完整方向空间中的当前态；Event 是持久拟合；DensitySite 只拟合 density；density 决定真正的 Sample；Sample 是唯一交互面；只有 Sample Response 可以反馈已有 EventCoordinate；自然相更新后必须重建交互面，外界相结束后新 Event 才在输入方向落位。**
+最终被接受的选择不得修改已经确立的因果边界：**场是完整方向空间中的当前态；Event 是持久拟合；DensitySite 只拟合 density；density 决定真正的 Sample；Sample 是唯一交互面；只有 Sample Response 可以反馈已有 EventCoordinate；自然相更新后必须重建交互面，外界相结束后新 Event 才在输入方向落位。**

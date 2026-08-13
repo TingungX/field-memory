@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:field-memory:v2:validation-artifact:v1",
+  "title": "field-memory v2 validation artifact v1",
+  "oneOf": [
+    { "$ref": "#/$defs/run_manifest" },
+    { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/result" }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "git_commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "phase": { "enum": ["phase-0", "phase-1", "phase-2", "phase-3", "phase-4"] },
+    "tier": { "type": ["string", "null"], "enum": [null, "S64", "S128", "S256", "S512", "S1024"] },
+    "backend_kind": { "enum": ["physics_reference", "semantic_production"] },
+    "space_kind": { "enum": ["physics_reference_s2", "semantic_production_384"] },
+    "embedding_identity": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "model_digest", "dataset_sha256", "source_dimension", "target_dimension", "projection_family", "projection_archive_sha256", "projection_content_sha256", "ollama_version"],
+          "properties": {
+            "model": { "const": "bge-m3:latest" },
+            "model_digest": { "$ref": "#/$defs/sha256" },
+            "dataset_sha256": { "$ref": "#/$defs/sha256" },
+            "source_dimension": { "const": 1024 },
+            "target_dimension": { "const": 384 },
+            "projection_family": { "const": "uncentered_spherical_pca_eigh_v1" },
+            "projection_archive_sha256": { "$ref": "#/$defs/sha256" },
+            "projection_content_sha256": { "$ref": "#/$defs/sha256" },
+            "ollama_version": { "const": "0.21.2" }
+          }
+        }
+      ]
+    },
+    "resource_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_seconds", "cpu_seconds", "rss_bytes", "artifact_bytes"],
+      "properties": {
+        "wall_seconds": { "type": "integer", "minimum": 1 },
+        "cpu_seconds": { "type": "integer", "minimum": 1 },
+        "rss_bytes": { "type": "integer", "minimum": 1 },
+        "artifact_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "resource_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_seconds", "cpu_seconds", "peak_rss_bytes", "artifact_bytes"],
+      "properties": {
+        "wall_seconds": { "type": "number", "minimum": 0 },
+        "cpu_seconds": { "type": "number", "minimum": 0 },
+        "peak_rss_bytes": { "type": "integer", "minimum": 0 },
+        "artifact_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "run_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "backend_kind": { "const": "physics_reference" } }, "required": ["backend_kind"] },
+          "then": { "properties": { "space_kind": { "const": "physics_reference_s2" }, "dimension": { "const": 3 }, "embedding_identity": { "type": "null" } } },
+          "else": { "properties": { "space_kind": { "const": "semantic_production_384" }, "dimension": { "const": 384 }, "embedding_identity": { "allOf": [{ "$ref": "#/$defs/embedding_identity" }, { "not": { "type": "null" } }] } } }
+        }
+      ],
+      "required": ["schema_version", "document_kind", "run_id", "batch_id", "phase", "tier", "started_at_utc", "command", "git_sha", "dirty_paths_sha256", "cargo_lock_sha256", "contract_sha256", "fixture_manifest_sha256", "artifact_schema_sha256", "seed", "backend_kind", "space_kind", "dimension", "sample_budget_k", "embedding_identity", "resource_limits"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "document_kind": { "const": "run_manifest" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "batch_id": { "type": ["string", "null"] },
+        "phase": { "$ref": "#/$defs/phase" },
+        "tier": { "$ref": "#/$defs/tier" },
+        "started_at_utc": { "type": "string", "format": "date-time" },
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "git_sha": { "$ref": "#/$defs/git_commit_sha" },
+        "dirty_paths_sha256": { "$ref": "#/$defs/sha256" },
+        "cargo_lock_sha256": { "$ref": "#/$defs/sha256" },
+        "contract_sha256": { "$ref": "#/$defs/sha256" },
+        "fixture_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "artifact_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "seed": { "const": 20260810 },
+        "backend_kind": { "$ref": "#/$defs/backend_kind" },
+        "space_kind": { "$ref": "#/$defs/space_kind" },
+        "dimension": { "enum": [3, 384] },
+        "sample_budget_k": { "type": ["integer", "null"], "minimum": 4 },
+        "embedding_identity": { "$ref": "#/$defs/embedding_identity" },
+        "resource_limits": { "$ref": "#/$defs/resource_limits" }
+      }
+    },
+    "sidecar_descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "path", "logical_rows_sha256", "file_sha256", "rows"],
+      "properties": {
+        "mode": { "enum": ["full", "streamed_full"] },
+        "path": { "type": "string", "pattern": "^natural/source-[A-Za-z0-9._-]+\\.ledger\\.jsonl\\.zst$" },
+        "logical_rows_sha256": { "$ref": "#/$defs/sha256" },
+        "file_sha256": { "$ref": "#/$defs/sha256" },
+        "rows": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "document_kind", "run_id", "state", "status", "exit_code", "finished_at_utc", "result_sha256", "failure_code", "sidecars"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "document_kind": { "const": "status" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["running", "complete"] },
+        "status": { "enum": ["running", "pass", "fail", "timeout", "resource_limit", "invalid_artifact", "skipped"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "finished_at_utc": { "type": ["string", "null"], "format": "date-time" },
+        "result_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "failure_code": { "type": ["string", "null"] },
+        "sidecars": { "type": "array", "items": { "$ref": "#/$defs/sidecar_descriptor" } }
+      }
+    },
+    "derived_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "ell", "resolution_rule", "physics_sha256", "sample_field_sha256"],
+      "properties": {
+        "level": { "type": "integer", "minimum": 0, "maximum": 20 },
+        "ell": { "type": "number", "exclusiveMinimum": 0 },
+        "resolution_rule": { "const": "residual_greedy_controls_v2" },
+        "physics_sha256": { "$ref": "#/$defs/sha256" },
+        "sample_field_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "transport_refinement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scalar_distribution_distance", "moment_distribution_distance"],
+      "properties": {
+        "scalar_distribution_distance": { "type": ["number", "null"], "minimum": 0 },
+        "moment_distribution_distance": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_initial", "raw_absorbed", "raw_residual", "raw_error", "closed_absorbed", "closed_error"],
+      "properties": {
+        "raw_initial": { "type": "number", "minimum": 0 },
+        "raw_absorbed": { "type": "number", "minimum": 0 },
+        "raw_residual": { "type": "number", "minimum": 0 },
+        "raw_error": { "type": "number", "minimum": 0 },
+        "closed_absorbed": { "type": ["number", "null"], "minimum": 0 },
+        "closed_error": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "named_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "value"],
+      "properties": { "id": { "type": "string" }, "value": { "type": "number" } }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "passed", "observed", "threshold", "failure_code"],
+      "properties": {
+        "id": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "observed": { "type": ["number", "null"] },
+        "threshold": { "type": ["number", "null"] },
+        "failure_code": { "type": ["string", "null"] }
+      }
+    },
+    "natural_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "weight", "raw_error", "closure_factor", "closed_error", "sample_ledger"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "weight": { "type": "number", "minimum": 0 },
+        "raw_error": { "type": "number", "minimum": 0 },
+        "closure_factor": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "closed_error": { "type": ["number", "null"], "minimum": 0 },
+        "sample_ledger": { "$ref": "#/$defs/sidecar_descriptor" }
+      }
+    },
+    "phase_trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordinal", "action", "sample_field_sha256", "state_sha256"],
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "action": { "type": "string", "minLength": 1 },
+        "sample_field_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "state_sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] }
+      }
+    },
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eps_abs", "eps_rel", "eps_angle", "eps_ledger", "eps_kernel", "eps_quadrature", "eps_representation", "eps_transport_distribution", "cut_locus_margin_rad"],
+      "properties": {
+        "eps_abs": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_rel": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_angle": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_ledger": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_kernel": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_quadrature": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_representation": { "type": "number", "exclusiveMinimum": 0 },
+        "eps_transport_distribution": { "type": "number", "exclusiveMinimum": 0 },
+        "cut_locus_margin_rad": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "backend_kind": { "const": "physics_reference" } }, "required": ["backend_kind"] },
+          "then": { "properties": { "space_kind": { "const": "physics_reference_s2" }, "dimension": { "const": 3 }, "embedding_identity": { "type": "null" } } },
+          "else": { "properties": { "space_kind": { "const": "semantic_production_384" }, "dimension": { "const": 384 }, "embedding_identity": { "allOf": [{ "$ref": "#/$defs/embedding_identity" }, { "not": { "type": "null" } }] } } }
+        }
+      ],
+      "required": ["schema_version", "document_kind", "run_id", "batch_id", "phase", "tier", "fixture", "seed", "backend_kind", "space_kind", "dimension", "embedding_identity", "derived_resolution", "n_event_rows", "n_density_sites", "sample_budget_k", "transport_sample_count", "physical_sample_count", "carrier_sample_count", "density_representation_error", "transport_refinement", "source_weights", "response_shares", "n_eff", "natural_sources", "natural_budget", "external_budget", "phase_trace", "tolerances", "resources", "gates", "sidecars", "status"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "document_kind": { "const": "result" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "batch_id": { "type": ["string", "null"] },
+        "phase": { "$ref": "#/$defs/phase" },
+        "tier": { "$ref": "#/$defs/tier" },
+        "fixture": { "type": "string", "minLength": 1 },
+        "seed": { "const": 20260810 },
+        "backend_kind": { "$ref": "#/$defs/backend_kind" },
+        "space_kind": { "$ref": "#/$defs/space_kind" },
+        "dimension": { "enum": [3, 384] },
+        "embedding_identity": { "$ref": "#/$defs/embedding_identity" },
+        "derived_resolution": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/derived_resolution" }] },
+        "n_event_rows": { "type": "integer", "minimum": 0 },
+        "n_density_sites": { "type": "integer", "minimum": 0 },
+        "sample_budget_k": { "type": ["integer", "null"], "minimum": 4 },
+        "transport_sample_count": { "type": "integer", "minimum": 0 },
+        "physical_sample_count": { "type": "integer", "minimum": 0 },
+        "carrier_sample_count": { "type": "integer", "minimum": 0 },
+        "density_representation_error": { "type": ["number", "null"], "minimum": 0 },
+        "transport_refinement": { "$ref": "#/$defs/transport_refinement" },
+        "source_weights": { "type": "array", "items": { "$ref": "#/$defs/named_value" } },
+        "response_shares": { "type": "array", "items": { "$ref": "#/$defs/named_value" } },
+        "n_eff": { "type": ["number", "null"], "minimum": 0 },
+        "natural_sources": { "type": "array", "items": { "$ref": "#/$defs/natural_source" } },
+        "natural_budget": { "$ref": "#/$defs/budget" },
+        "external_budget": { "$ref": "#/$defs/budget" },
+        "phase_trace": { "type": "array", "items": { "$ref": "#/$defs/phase_trace" } },
+        "tolerances": { "$ref": "#/$defs/tolerances" },
+        "resources": { "$ref": "#/$defs/resource_usage" },
+        "gates": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
+        "sidecars": { "type": "array", "items": { "$ref": "#/$defs/sidecar_descriptor" } },
+        "status": { "enum": ["pass", "fail", "timeout", "resource_limit", "invalid_artifact", "skipped"] }
+      }
+    }
+  }
+}
