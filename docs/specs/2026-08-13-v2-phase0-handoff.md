@@ -4,7 +4,7 @@ Status: active
 Owner: field-memory
 Last updated: 2026-08-13
 Scope: v2 独立 crate 的 Phase 0 检查点、已实现边界、验证证据与后续接续顺序
-Related code: `crates/core/field-mem-v2`、`crates/ext-v2-cli`；基础检查点 commit `0aa9b45228ff60a8de2cbbf8b21c477b82eb3feb`，本文件记录其后的 Sample 投影检查点
+Related code: `crates/core/field-mem-v2`、`crates/ext-v2-cli`；Sample 投影检查点 commit `aefa48f`
 Related docs: [v2 实现契约](field-memory-v2-implementation-contract.md)、[v2 分阶段验证计划](2026-08-10-field-memory-v2-validation-plan.md)、[v2 理论基石](../design/field-memory-v2-foundations.md)、[Sample 投影与 backend 边界 ADR](../decisions/2026-08-13-v2-sample-projection-and-backend-boundary.md)
 
 ## 1. 当前结论
